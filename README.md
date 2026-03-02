@@ -1,4 +1,4 @@
-# PyBullet MCP Server
+9# PyBullet MCP Server
 
 Version 1.0.0
 
@@ -627,6 +627,4 @@ Contributions are welcome! Please ensure:
 
 For issues, questions, or contributions:
 - Review this README and troubleshooting section
-- Check the design document in `.kiro/specs/pybullet-mcp-server/design.md`
-- Test the server directly with Python to isolate issues
 - Review PyBullet documentation for physics-specific questions
