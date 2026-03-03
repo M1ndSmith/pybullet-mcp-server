@@ -19,7 +19,7 @@ simulation_manager = SimulationManager()
 object_manager = ObjectManager(simulation_manager)
 constraint_manager = ConstraintManager(simulation_manager)
 collision_handler = CollisionQueryHandler(simulation_manager)
-persistence_handler = PersistenceHandler(simulation_manager, object_manager)
+persistence_handler = PersistenceHandler(simulation_manager, object_manager, constraint_manager)
 
 
 # ============================================================================
@@ -736,6 +736,285 @@ def load_simulation(file_path: str, gui: bool = False) -> dict:
         raise ToolError(str(e))
     except Exception as e:
         raise ToolError(f"Failed to load simulation: {str(e)}")
+
+
+# ============================================================================
+# Joint Control Tools (Robot Manipulation)
+# ============================================================================
+
+@mcp.tool
+def get_num_joints(sim_id: str, object_id: int) -> int:
+    """Get the number of joints in a URDF model.
+    
+    Args:
+        sim_id: UUID string identifying the simulation.
+        object_id: PyBullet object ID (must be a URDF model with joints).
+    
+    Returns:
+        Number of joints in the model (integer).
+    
+    Example:
+        get_num_joints(sim_id="abc-123", object_id=0)
+    """
+    try:
+        import pybullet as p
+        sim = simulation_manager.get_simulation(sim_id)
+        
+        # Validate object exists
+        if object_id not in sim.objects:
+            raise ValueError(f"Object {object_id} not found in simulation {sim_id}")
+        
+        num_joints = p.getNumJoints(object_id, physicsClientId=sim.client_id)
+        return num_joints
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to get number of joints: {str(e)}")
+
+
+@mcp.tool
+def get_joint_info(sim_id: str, object_id: int, joint_index: int) -> dict:
+    """Get detailed information about a specific joint.
+    
+    Args:
+        sim_id: UUID string identifying the simulation.
+        object_id: PyBullet object ID.
+        joint_index: Index of the joint (0 to num_joints-1).
+    
+    Returns:
+        Dictionary containing:
+            - joint_index: Index of the joint
+            - joint_name: Name of the joint
+            - joint_type: Type of joint (0=REVOLUTE, 1=PRISMATIC, 4=FIXED, etc.)
+            - joint_lower_limit: Lower position limit
+            - joint_upper_limit: Upper position limit
+            - joint_max_force: Maximum force the joint can apply
+            - joint_max_velocity: Maximum velocity of the joint
+            - joint_axis: Axis of rotation/translation [x, y, z]
+    
+    Example:
+        get_joint_info(sim_id="abc-123", object_id=0, joint_index=0)
+    """
+    try:
+        import pybullet as p
+        sim = simulation_manager.get_simulation(sim_id)
+        
+        # Validate object exists
+        if object_id not in sim.objects:
+            raise ValueError(f"Object {object_id} not found in simulation {sim_id}")
+        
+        # Get joint info
+        info = p.getJointInfo(object_id, joint_index, physicsClientId=sim.client_id)
+        
+        return {
+            "joint_index": info[0],
+            "joint_name": info[1].decode('utf-8'),
+            "joint_type": info[2],
+            "joint_lower_limit": info[8],
+            "joint_upper_limit": info[9],
+            "joint_max_force": info[10],
+            "joint_max_velocity": info[11],
+            "joint_axis": list(info[13])
+        }
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to get joint info: {str(e)}")
+
+
+@mcp.tool
+def get_joint_state(sim_id: str, object_id: int, joint_index: int) -> dict:
+    """Get the current state of a joint (position, velocity, forces).
+    
+    Args:
+        sim_id: UUID string identifying the simulation.
+        object_id: PyBullet object ID.
+        joint_index: Index of the joint.
+    
+    Returns:
+        Dictionary containing:
+            - joint_position: Current position of the joint
+            - joint_velocity: Current velocity of the joint
+            - joint_reaction_forces: Reaction forces at the joint [Fx, Fy, Fz, Mx, My, Mz]
+            - applied_motor_torque: Torque applied by the motor
+    
+    Example:
+        get_joint_state(sim_id="abc-123", object_id=0, joint_index=0)
+    """
+    try:
+        import pybullet as p
+        sim = simulation_manager.get_simulation(sim_id)
+        
+        # Validate object exists
+        if object_id not in sim.objects:
+            raise ValueError(f"Object {object_id} not found in simulation {sim_id}")
+        
+        # Get joint state
+        state = p.getJointState(object_id, joint_index, physicsClientId=sim.client_id)
+        
+        return {
+            "joint_position": state[0],
+            "joint_velocity": state[1],
+            "joint_reaction_forces": list(state[2]),
+            "applied_motor_torque": state[3]
+        }
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to get joint state: {str(e)}")
+
+
+@mcp.tool
+def set_joint_motor_control(
+    sim_id: str,
+    object_id: int,
+    joint_index: int,
+    control_mode: str,
+    target_position: Optional[float] = None,
+    target_velocity: Optional[float] = None,
+    force: Optional[float] = None,
+    position_gain: float = 0.1,
+    velocity_gain: float = 1.0
+) -> str:
+    """Control a robot joint using position, velocity, or torque control.
+    
+    Args:
+        sim_id: UUID string identifying the simulation.
+        object_id: PyBullet object ID.
+        joint_index: Index of the joint to control.
+        control_mode: Control mode - "POSITION_CONTROL", "VELOCITY_CONTROL", or "TORQUE_CONTROL".
+        target_position: Target position for position control (radians or meters).
+        target_velocity: Target velocity for velocity control (rad/s or m/s).
+        force: Maximum force/torque to apply (Newtons or Newton-meters).
+        position_gain: Position gain (Kp) for position control. Default is 0.1.
+        velocity_gain: Velocity gain (Kd) for position/velocity control. Default is 1.0.
+    
+    Returns:
+        Confirmation message.
+    
+    Example:
+        set_joint_motor_control(sim_id="abc-123", object_id=0, joint_index=0, 
+                               control_mode="POSITION_CONTROL", target_position=1.57, force=100)
+    """
+    try:
+        import pybullet as p
+        sim = simulation_manager.get_simulation(sim_id)
+        
+        # Validate object exists
+        if object_id not in sim.objects:
+            raise ValueError(f"Object {object_id} not found in simulation {sim_id}")
+        
+        # Map control mode string to PyBullet constant
+        mode_map = {
+            "POSITION_CONTROL": p.POSITION_CONTROL,
+            "VELOCITY_CONTROL": p.VELOCITY_CONTROL,
+            "TORQUE_CONTROL": p.TORQUE_CONTROL
+        }
+        
+        if control_mode not in mode_map:
+            raise ValueError(
+                f"Invalid control mode: {control_mode}. "
+                f"Must be one of: {list(mode_map.keys())}"
+            )
+        
+        # Build kwargs for setJointMotorControl2
+        kwargs = {
+            "bodyUniqueId": object_id,
+            "jointIndex": joint_index,
+            "controlMode": mode_map[control_mode],
+            "physicsClientId": sim.client_id
+        }
+        
+        if target_position is not None:
+            kwargs["targetPosition"] = target_position
+        if target_velocity is not None:
+            kwargs["targetVelocity"] = target_velocity
+        if force is not None:
+            kwargs["force"] = force
+        if control_mode == "POSITION_CONTROL":
+            kwargs["positionGain"] = position_gain
+            kwargs["velocityGain"] = velocity_gain
+        elif control_mode == "VELOCITY_CONTROL":
+            kwargs["velocityGain"] = velocity_gain
+        
+        # Apply motor control
+        p.setJointMotorControl2(**kwargs)
+        
+        return f"Joint {joint_index} motor control set to {control_mode}"
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to set joint motor control: {str(e)}")
+
+
+@mcp.tool
+def calculate_inverse_kinematics(
+    sim_id: str,
+    object_id: int,
+    end_effector_link_index: int,
+    target_position: list[float],
+    target_orientation: Optional[list[float]] = None,
+    lower_limits: Optional[list[float]] = None,
+    upper_limits: Optional[list[float]] = None,
+    joint_ranges: Optional[list[float]] = None,
+    rest_poses: Optional[list[float]] = None
+) -> list[float]:
+    """Calculate inverse kinematics to reach a target end-effector pose.
+    
+    Args:
+        sim_id: UUID string identifying the simulation.
+        object_id: PyBullet object ID (robot with joints).
+        end_effector_link_index: Index of the end-effector link.
+        target_position: Target position [x, y, z] for the end-effector.
+        target_orientation: Target orientation as quaternion [x, y, z, w]. Optional.
+        lower_limits: Lower joint limits. Optional.
+        upper_limits: Upper joint limits. Optional.
+        joint_ranges: Range of motion for each joint. Optional.
+        rest_poses: Rest poses for null space. Optional.
+    
+    Returns:
+        List of joint positions (angles/distances) to reach the target pose.
+    
+    Example:
+        calculate_inverse_kinematics(sim_id="abc-123", object_id=0, 
+                                     end_effector_link_index=6, 
+                                     target_position=[0.5, 0.0, 0.5])
+    """
+    try:
+        import pybullet as p
+        sim = simulation_manager.get_simulation(sim_id)
+        
+        # Validate object exists
+        if object_id not in sim.objects:
+            raise ValueError(f"Object {object_id} not found in simulation {sim_id}")
+        
+        # Build kwargs for calculateInverseKinematics
+        kwargs = {
+            "bodyUniqueId": object_id,
+            "endEffectorLinkIndex": end_effector_link_index,
+            "targetPosition": target_position,
+            "physicsClientId": sim.client_id
+        }
+        
+        if target_orientation is not None:
+            kwargs["targetOrientation"] = target_orientation
+        if lower_limits is not None:
+            kwargs["lowerLimits"] = lower_limits
+        if upper_limits is not None:
+            kwargs["upperLimits"] = upper_limits
+        if joint_ranges is not None:
+            kwargs["jointRanges"] = joint_ranges
+        if rest_poses is not None:
+            kwargs["restPoses"] = rest_poses
+        
+        # Calculate IK
+        joint_positions = p.calculateInverseKinematics(**kwargs)
+        
+        return list(joint_positions)
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to calculate inverse kinematics: {str(e)}")
 
 
 # ============================================================================

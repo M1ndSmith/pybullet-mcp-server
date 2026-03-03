@@ -7,6 +7,12 @@ import pybullet as p
 from .simulation_context import SimulationContext
 
 
+# Resource limits to prevent DoS attacks
+MAX_SIMULATIONS = 10
+MAX_OBJECTS_PER_SIMULATION = 1000
+MAX_CONSTRAINTS_PER_SIMULATION = 500
+
+
 class SimulationManager:
     """Manages multiple PyBullet physics simulations.
     
@@ -35,7 +41,15 @@ class SimulationManager:
             
         Raises:
             RuntimeError: If PyBullet client connection fails.
+            ValueError: If maximum number of simulations reached.
         """
+        # Check resource limit
+        if len(self.simulations) >= MAX_SIMULATIONS:
+            raise ValueError(
+                f"Maximum number of simulations ({MAX_SIMULATIONS}) reached. "
+                f"Destroy existing simulations before creating new ones."
+            )
+        
         # Connect to PyBullet physics engine
         mode = p.GUI if gui else p.DIRECT
         client_id = p.connect(mode)

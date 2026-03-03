@@ -14,8 +14,8 @@ class TestPersistenceHandler:
     def setup_method(self):
         """Set up test fixtures."""
         self.sim_manager = SimulationManager()
-        self.obj_manager = ObjectManager(self.sim_manager)
-        self.persistence = PersistenceHandler(self.sim_manager, self.obj_manager)
+        self.obj_manager = ObjectManager(self.sim_manager, strict_path_validation=False)
+        self.persistence = PersistenceHandler(self.sim_manager, self.obj_manager, strict_path_validation=False)
     
     def teardown_method(self):
         """Clean up after tests."""

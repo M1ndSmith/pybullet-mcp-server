@@ -51,7 +51,19 @@ class SimulationContext:
         Args:
             object_id: Unique identifier for the object in PyBullet
             metadata: Dictionary containing object properties and state
+            
+        Raises:
+            ValueError: If maximum number of objects reached.
         """
+        # Import here to avoid circular dependency
+        from .simulation_manager import MAX_OBJECTS_PER_SIMULATION
+        
+        if len(self.objects) >= MAX_OBJECTS_PER_SIMULATION:
+            raise ValueError(
+                f"Maximum number of objects ({MAX_OBJECTS_PER_SIMULATION}) reached in simulation. "
+                f"Remove objects before adding new ones."
+            )
+        
         self.objects[object_id] = metadata
 
     def remove_object(self, object_id: int) -> bool:
@@ -85,7 +97,19 @@ class SimulationContext:
         Args:
             constraint_id: Unique identifier for the constraint in PyBullet
             metadata: Dictionary containing constraint properties
+            
+        Raises:
+            ValueError: If maximum number of constraints reached.
         """
+        # Import here to avoid circular dependency
+        from .simulation_manager import MAX_CONSTRAINTS_PER_SIMULATION
+        
+        if len(self.constraints) >= MAX_CONSTRAINTS_PER_SIMULATION:
+            raise ValueError(
+                f"Maximum number of constraints ({MAX_CONSTRAINTS_PER_SIMULATION}) reached in simulation. "
+                f"Remove constraints before adding new ones."
+            )
+        
         self.constraints[constraint_id] = metadata
 
     def remove_constraint(self, constraint_id: int) -> bool:

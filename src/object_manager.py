@@ -16,6 +16,44 @@ SHAPE_MAP = {
 }
 
 
+def validate_file_path(file_path: str, allowed_base: str = None, strict: bool = True) -> str:
+    """Validate and normalize file path to prevent path traversal attacks.
+    
+    Args:
+        file_path: Path to validate.
+        allowed_base: Base directory to restrict access to. If None, uses current directory.
+        strict: If True, enforce path restrictions. If False, only normalize path.
+        
+    Returns:
+        Absolute normalized path.
+        
+    Raises:
+        ValueError: If strict=True and path is outside allowed directory or contains suspicious patterns.
+    """
+    # Resolve to absolute path
+    abs_path = os.path.abspath(file_path)
+    
+    # If not strict mode, just return normalized path
+    if not strict:
+        return abs_path
+    
+    # Default to current working directory if no base specified
+    if allowed_base is None:
+        allowed_base = os.getcwd()
+    
+    # Resolve allowed base to absolute path
+    allowed_abs = os.path.abspath(allowed_base)
+    
+    # Check if path is within allowed directory
+    if not abs_path.startswith(allowed_abs):
+        raise ValueError(
+            f"Access denied: File path '{file_path}' is outside allowed directory. "
+            f"Only files within '{allowed_abs}' are accessible."
+        )
+    
+    return abs_path
+
+
 class ObjectManager:
     """Manages objects in PyBullet physics simulations.
     
@@ -24,13 +62,15 @@ class ObjectManager:
     will convert to ToolError.
     """
     
-    def __init__(self, simulation_manager: SimulationManager):
+    def __init__(self, simulation_manager: SimulationManager, strict_path_validation: bool = True):
         """Initialize the object manager.
         
         Args:
             simulation_manager: SimulationManager instance for accessing simulations.
+            strict_path_validation: If True, enforce path restrictions. If False, allow any path.
         """
         self.simulation_manager = simulation_manager
+        self.strict_path_validation = strict_path_validation
     
     def create_primitive(
         self,
@@ -187,15 +227,21 @@ class ObjectManager:
             PyBullet object ID (integer).
             
         Raises:
-            ValueError: If simulation not found.
+            ValueError: If simulation not found or path validation fails.
             FileNotFoundError: If URDF file doesn't exist.
             RuntimeError: If URDF loading fails.
         """
         # Get simulation context
         sim = self.simulation_manager.get_simulation(sim_id)
         
+        # Validate file path to prevent path traversal
+        try:
+            validated_path = validate_file_path(file_path, strict=self.strict_path_validation)
+        except ValueError as e:
+            raise ValueError(f"Invalid file path: {str(e)}")
+        
         # Validate file exists
-        if not os.path.exists(file_path):
+        if not os.path.exists(validated_path):
             raise ValueError(f"URDF file not found: {file_path}")
         
         # Default orientation to identity quaternion
@@ -205,7 +251,7 @@ class ObjectManager:
         # Load URDF file
         try:
             object_id = p.loadURDF(
-                file_path,
+                validated_path,
                 basePosition=position,
                 baseOrientation=orientation,
                 physicsClientId=sim.client_id
@@ -216,7 +262,7 @@ class ObjectManager:
         # Track object metadata in simulation context
         metadata = {
             "type": "urdf",
-            "file_path": file_path,
+            "file_path": validated_path,
             "shape": "urdf"
         }
         sim.add_object(object_id, metadata)
