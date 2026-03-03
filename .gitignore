@@ -51,3 +51,7 @@ simulation_*.json
 # Workspace
 *.code-workspace
 *.kiro
+
+# Local development tracking files
+ROADMAP.md
+CHANGELOG_v1.1.0.md
