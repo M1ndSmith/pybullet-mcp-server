@@ -6,7 +6,7 @@ A Model Context Protocol (MCP) server that enables AI assistants to interact wit
 
 ## Features
 
-- **20 MCP Tools**: Comprehensive API for physics simulation control
+- **25 MCP Tools**: Comprehensive API for physics simulation control including robot joint control
 - **Simulation Management**: Create and manage multiple independent physics simulations with configurable gravity
 - **Object Manipulation**: Add primitive shapes (box, sphere, cylinder, capsule) and URDF models with full property control
 - **Physics Control**: Apply forces, torques, and step through simulations with configurable timesteps
@@ -167,7 +167,7 @@ On Windows, use: `"command": "C:\\path\\to\\pybullet-mcp-server\\venv\\Scripts\\
 
 ## Available Tools
 
-The server exposes 20 tools through the MCP protocol:
+The server exposes 25 tools through the MCP protocol:
 
 ### Simulation Management (5 tools)
 - **`create_simulation`**: Initialize a new physics simulation with configurable gravity and optional GUI
@@ -263,6 +263,28 @@ The server exposes 20 tools through the MCP protocol:
   - Parameters: `file_path` (str), `gui` (bool, default: false)
   - Returns: new simulation_id, file_path
 
+### Robot Control (5 tools)
+- **`get_num_joints`**: Query number of joints in a URDF model
+  - Parameters: `sim_id` (str), `object_id` (int)
+  - Returns: number of joints (int)
+  
+- **`get_joint_info`**: Get detailed joint properties
+  - Parameters: `sim_id` (str), `object_id` (int), `joint_index` (int)
+  - Returns: joint_name, joint_type, lower_limit, upper_limit, max_force, max_velocity, joint_axis
+  
+- **`get_joint_state`**: Get current joint state
+  - Parameters: `sim_id` (str), `object_id` (int), `joint_index` (int)
+  - Returns: joint_position, joint_velocity, reaction_forces, motor_torque
+  
+- **`set_joint_motor_control`**: Control robot joints
+  - Parameters: `sim_id` (str), `object_id` (int), `joint_index` (int), `control_mode` (str), `target_position` (float, optional), `target_velocity` (float, optional), `force` (float, optional), `position_gain` (float, optional), `velocity_gain` (float, optional)
+  - Control modes: "POSITION_CONTROL", "VELOCITY_CONTROL", "TORQUE_CONTROL"
+  - Returns: confirmation message
+  
+- **`calculate_inverse_kinematics`**: Calculate joint angles for target end-effector pose
+  - Parameters: `sim_id` (str), `object_id` (int), `end_effector_link_index` (int), `target_position` (list[float]), `target_orientation` (list[float], optional), `lower_limits` (list[float], optional), `upper_limits` (list[float], optional), `joint_ranges` (list[float], optional), `rest_poses` (list[float], optional)
+  - Returns: list of joint positions
+
 ## Example Workflows
 
 ### Basic Falling Box
@@ -321,13 +343,17 @@ Persist a simulation:
 
 ### Robot Simulation
 
-Load a URDF robot model:
+Load and control a URDF robot model:
 
 ```python
 "Create a simulation with GUI enabled"
 "Load URDF from /path/to/robot.urdf at position (0, 0, 1)"
+"How many joints does object 0 have?"
+"Get information about joint 0 of object 0"
+"Get the current state of joint 0"
+"Set joint 0 to position 1.57 with position control"
 "Step the simulation 100 times"
-"Get the state of object 0"
+"Calculate inverse kinematics for object 0 end-effector at position [0.5, 0, 0.5]"
 ```
 
 ## Development
@@ -596,7 +622,7 @@ PyBullet Physics Engine
 ```
 
 **Key Components:**
-- **FastMCP Server** (`src/server.py`): Exposes 20 MCP tools using `@mcp.tool` decorators
+- **FastMCP Server** (`src/server.py`): Exposes 25 MCP tools using `@mcp.tool` decorators
 - **SimulationManager**: Manages PyBullet physics clients and simulation lifecycle
 - **ObjectManager**: Handles object creation, manipulation, and state queries
 - **ConstraintManager**: Creates and manages joints between objects

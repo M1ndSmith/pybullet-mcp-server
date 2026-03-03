@@ -6,7 +6,8 @@ from typing import Dict, Any, List
 import pybullet as p
 
 from .simulation_manager import SimulationManager
-from .object_manager import ObjectManager
+from .object_manager import ObjectManager, validate_file_path
+from .constraint_manager import ConstraintManager
 
 
 class PersistenceHandler:
@@ -20,16 +21,23 @@ class PersistenceHandler:
     def __init__(
         self,
         simulation_manager: SimulationManager,
-        object_manager: ObjectManager
+        object_manager: ObjectManager,
+        constraint_manager: ConstraintManager = None,
+        strict_path_validation: bool = True
     ):
         """Initialize the persistence handler.
         
         Args:
             simulation_manager: SimulationManager instance for accessing simulations.
             object_manager: ObjectManager instance for creating objects.
+            constraint_manager: ConstraintManager instance for creating constraints.
+                               Optional for backward compatibility.
+            strict_path_validation: If True, enforce path restrictions. If False, allow any path.
         """
         self.simulation_manager = simulation_manager
         self.object_manager = object_manager
+        self.constraint_manager = constraint_manager
+        self.strict_path_validation = strict_path_validation
     
     def serialize_simulation(self, sim_id: str) -> Dict[str, Any]:
         """Convert SimulationContext to JSON-serializable dictionary.
@@ -125,15 +133,21 @@ class PersistenceHandler:
             file_path: Path where the state file should be written.
             
         Raises:
-            ValueError: If simulation not found.
+            ValueError: If simulation not found or path validation fails.
             IOError: If file cannot be written (permission denied, disk full, etc.).
         """
+        # Validate file path to prevent path traversal
+        try:
+            validated_path = validate_file_path(file_path, strict=self.strict_path_validation)
+        except ValueError as e:
+            raise ValueError(f"Invalid file path: {str(e)}")
+        
         # Serialize simulation to dictionary
         state = self.serialize_simulation(sim_id)
         
         # Write to file with error handling
         try:
-            with open(file_path, 'w') as f:
+            with open(validated_path, 'w') as f:
                 json.dump(state, f, indent=2)
         except PermissionError:
             raise IOError(f"Permission denied writing to {file_path}")
@@ -152,15 +166,21 @@ class PersistenceHandler:
             
         Raises:
             IOError: If file cannot be read or doesn't exist.
-            ValueError: If file contains invalid JSON or missing required fields.
+            ValueError: If file contains invalid JSON, missing required fields, or path validation fails.
         """
+        # Validate file path to prevent path traversal
+        try:
+            validated_path = validate_file_path(file_path, strict=self.strict_path_validation)
+        except ValueError as e:
+            raise ValueError(f"Invalid file path: {str(e)}")
+        
         # Validate file exists
-        if not os.path.exists(file_path):
+        if not os.path.exists(validated_path):
             raise IOError(f"File not found: {file_path}")
         
         # Read and parse file with error handling
         try:
-            with open(file_path, 'r') as f:
+            with open(validated_path, 'r') as f:
                 state = json.load(f)
         except PermissionError:
             raise IOError(f"Permission denied reading from {file_path}")
@@ -328,9 +348,38 @@ class PersistenceHandler:
             
         Raises:
             ValueError: If constraint data is invalid or references missing objects.
+            RuntimeError: If constraint_manager is not available.
         """
-        # This is a placeholder for constraint recreation
-        # Actual implementation would depend on ConstraintManager
-        # For now, we just track the metadata without creating the constraint
-        # This will be implemented when ConstraintManager is available
-        pass
+        # Check if constraint manager is available
+        if self.constraint_manager is None:
+            raise RuntimeError(
+                "Cannot deserialize constraints: ConstraintManager not provided. "
+                "Constraints will not be restored from saved simulation."
+            )
+        
+        # Map old object IDs to new object IDs
+        old_parent_id = const_data["parent_id"]
+        old_child_id = const_data["child_id"]
+        
+        if old_parent_id not in object_id_map:
+            raise ValueError(f"Parent object {old_parent_id} not found in loaded simulation")
+        if old_child_id not in object_id_map:
+            raise ValueError(f"Child object {old_child_id} not found in loaded simulation")
+        
+        new_parent_id = object_id_map[old_parent_id]
+        new_child_id = object_id_map[old_child_id]
+        
+        # Create constraint with remapped object IDs
+        constraint_id = self.constraint_manager.create_constraint(
+            sim_id=sim_id,
+            parent_id=new_parent_id,
+            child_id=new_child_id,
+            joint_type=const_data["joint_type"],
+            joint_axis=const_data.get("joint_axis", [0, 0, 1]),
+            parent_frame_position=const_data.get("parent_frame_position", [0, 0, 0]),
+            child_frame_position=const_data.get("child_frame_position", [0, 0, 0]),
+            parent_frame_orientation=const_data.get("parent_frame_orientation", [0, 0, 0, 1]),
+            child_frame_orientation=const_data.get("child_frame_orientation", [0, 0, 0, 1])
+        )
+        
+        return constraint_id

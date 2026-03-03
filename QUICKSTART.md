@@ -267,9 +267,65 @@ Load the simulation from /tmp/my_simulation.json with GUI enabled
 
 ---
 
+### 7. Robot Control (5 tools)
+
+#### Query Joint Information
+```
+How many joints does object 0 have?
+```
+
+```
+Get information about joint 0 of object 0
+```
+
+```
+Get detailed information for all joints of object 0 (joints 0 through 5)
+```
+
+#### Query Joint State
+```
+What is the current state of joint 0 on object 0?
+```
+
+```
+Get the position and velocity of joint 2
+```
+
+#### Control Joints
+```
+Set joint 0 to position 1.57 using position control with force 100
+```
+
+```
+Control joint 1 with velocity 2.0 using velocity control
+```
+
+```
+Apply torque control to joint 2 with force 10
+```
+
+```
+Set joint 3 to position 0.5 with position gain 0.1 and velocity gain 0.05
+```
+
+#### Inverse Kinematics
+```
+Calculate inverse kinematics for object 0 end-effector link 6 to reach position [0.5, 0, 0.5]
+```
+
+```
+Calculate IK for end-effector at position [0.3, 0.2, 0.4] with orientation [0, 0, 0, 1]
+```
+
+```
+Calculate IK with joint limits: lower [-3.14, -1.57, 0], upper [3.14, 1.57, 3.14]
+```
+
+---
+
 ## Complete Exploration Workflow
 
-Here's a complete sequence of prompts that exercises all 22 tools:
+Here's a complete sequence of prompts that exercises all 27 tools:
 
 ### Phase 1: Setup (Simulation Management)
 ```
@@ -337,10 +393,25 @@ Here's a complete sequence of prompts that exercises all 22 tools:
 30. Step the simulation 200 times and observe
 ```
 
-### Phase 10: Cleanup
+### Phase 10: Robot Control (with URDF)
 ```
-31. List all active simulations
-32. Destroy all simulations
+31. Create a new simulation
+32. Load URDF from /path/to/robot.urdf at position (0, 0, 0)
+33. How many joints does object 0 have?
+34. Get information about joint 0
+35. Get the current state of joint 0
+36. Set joint 0 to position 1.57 using position control
+37. Step the simulation 100 times
+38. Get the state of joint 0 again
+39. Calculate inverse kinematics for end-effector link 6 at position [0.5, 0, 0.5]
+40. Apply the IK solution to the joints
+41. Step the simulation 50 times
+```
+
+### Phase 11: Cleanup
+```
+42. List all active simulations
+43. Destroy all simulations
 ```
 
 ---
@@ -380,13 +451,29 @@ Step the simulation 400 times
 Track the position of the sliding box every 100 steps
 ```
 
-### Example 4: Robot Arm (URDF)
+### Example 4: Robot Arm Control (URDF)
 ```
 Create a simulation with GUI
 Load URDF from /path/to/robot_arm.urdf at position (0,0,0)
-Step the simulation 100 times
-Get the state of object 0
-Apply forces to simulate movement
+How many joints does object 0 have?
+Get information about joint 0
+Get the current state of joint 0
+Set joint 0 to position 1.57 using position control with force 100
+Set joint 1 to position -0.5 using position control
+Step the simulation 200 times
+Get the state of joint 0
+Calculate inverse kinematics for end-effector link 6 at position [0.4, 0.2, 0.3]
+```
+
+### Example 5: Robot Manipulation with IK
+```
+Create a simulation
+Load URDF from /path/to/robot_arm.urdf at position (0,0,0)
+Add a target sphere at (0.5, 0, 0.5) with radius 0.05
+Calculate IK for end-effector link 6 to reach position [0.5, 0, 0.5]
+Apply the IK solution to all joints using position control
+Step the simulation 300 times
+Check if the end-effector reached the target
 ```
 
 ---
