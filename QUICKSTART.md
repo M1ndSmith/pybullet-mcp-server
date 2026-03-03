@@ -1,8 +1,18 @@
 # PyBullet MCP Server - Quick Start Guide
 
-Version 1.0.0
+Version 1.1.0
 
 This guide will help you start the server and explore all available tools through example prompts.
+
+## Important: Coordinate Requirements
+
+Before starting, note these critical requirements:
+- **All vectors must be complete 3D coordinates**: `[x, y, z]`
+- **Gravity**: `[0, 0, -9.81]` (the server accepts shorthand `[-9.81]` and expands it)
+- **Positions**: `[x, y, z]` (shorthand like `[x, y]` is expanded to `[x, y, 0]`)
+- **Forces/Torques**: `[fx, fy, fz]` (shorthand `[fx]` is expanded to `[fx, 0, 0]`)
+- **Orientations**: `[x, y, z, w]` quaternion (shorthand `[w]` is expanded to `[0, 0, 0, w]`)
+- **Mass must be positive**: Use large values (e.g., 1000) for static objects
 
 ## Table of Contents
 
@@ -141,6 +151,11 @@ Add a green cylinder at position (-1, 0, 1) with radius 0.2, height 1.0, and mas
 Add a yellow capsule at position (1, 1, 1) with radius 0.15, height 0.8, and mass 1.5
 ```
 
+**Note**: Mass must be positive. For ground planes or static objects, use large mass values:
+```
+Add a ground plane: box at (0, 0, 0) with dimensions 10x10x0.1 and mass 1000
+```
+
 #### Load URDF Model
 ```
 Load the URDF file from /absolute/path/to/robot.urdf at position (0, 0, 0)
@@ -167,6 +182,11 @@ Move object 1 to position (1, 0, 0) with orientation (0, 0, 0, 1)
 
 ```
 Apply a force of [10, 0, 0] to object 0
+```
+
+**Note**: Forces and torques must be 3D vectors. The server accepts shorthand:
+```
+Apply a force of [10] to object 0  # Expands to [10, 0, 0]
 ```
 
 ```
@@ -297,7 +317,7 @@ Set joint 0 to position 1.57 using position control with force 100
 ```
 
 ```
-Control joint 1 with velocity 2.0 using velocity control
+Control joint 1 with velocity 2.0 using velocity control with force 50
 ```
 
 ```
@@ -306,6 +326,18 @@ Apply torque control to joint 2 with force 10
 
 ```
 Set joint 3 to position 0.5 with position gain 0.1 and velocity gain 0.05
+```
+
+**Control Modes Explained:**
+- **Position Control**: Move joint to target angle/position (like a servo)
+- **Velocity Control**: Spin joint at target speed (like a motor)
+- **Torque Control**: Apply direct torque (like manual force)
+
+**Example - Making a wheel spin:**
+```
+Set joint 2 to velocity 5.0 using velocity control with force 10
+Step the simulation 100 times
+Get the state of joint 2  # Should show velocity ~5.0 rad/s
 ```
 
 #### Inverse Kinematics
@@ -319,6 +351,28 @@ Calculate IK for end-effector at position [0.3, 0.2, 0.4] with orientation [0, 0
 
 ```
 Calculate IK with joint limits: lower [-3.14, -1.57, 0], upper [3.14, 1.57, 3.14]
+```
+
+**IK Workflow Example:**
+```
+# 1. Load robot arm
+Load URDF from /path/to/robot_arm.urdf at position (0, 0, 0)
+
+# 2. Calculate IK for target position
+Calculate IK for object 0 end-effector link 6 at position [0.5, 0.3, 0.4]
+# Returns: [0.44, 0.54, 0.13, -1.46, 0.004, 0.31, 0.0]
+
+# 3. Apply joint angles using position control
+Set joint 0 to position 0.44 with position control and force 300
+Set joint 1 to position 0.54 with position control and force 300
+Set joint 2 to position 0.13 with position control and force 300
+# ... (repeat for all joints)
+
+# 4. Step simulation to let joints move
+Step the simulation 200 times
+
+# 5. Verify end-effector reached target
+Get the state of joint 6
 ```
 
 ---
@@ -480,6 +534,133 @@ Check if the end-effector reached the target
 
 ## Troubleshooting
 
+### Common Issues
+
+**1. Import errors when starting the server**
+```
+ModuleNotFoundError: No module named 'mcp' or 'pybullet'
+```
+**Solution**: Ensure your virtual environment is activated and dependencies are installed:
+```bash
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install fastmcp pybullet
+```
+
+**2. Coordinate validation errors**
+```
+Error: "force needs a 3 coordinates [x,y,z]"
+Error: "position needs a 3 coordinates [x,y,z]"
+```
+**Solution**: The server accepts shorthand notation and expands it automatically:
+- `[10]` → `[10, 0, 0]`
+- `[1, 2]` → `[1, 2, 0]`
+- `[-9.81]` → `[0, 0, -9.81]`
+
+However, if you see this error, provide the full 3D vector explicitly.
+
+**3. Mass validation error**
+```
+Error: "Mass must be positive, got 0.0"
+```
+**Solution**: PyBullet requires positive mass. For static objects:
+```
+# Wrong
+Add a box with mass 0  # Error!
+
+# Correct
+Add a box with mass 1000  # Heavy static object
+```
+
+**4. Python version errors**
+```
+SyntaxError or version compatibility issues
+```
+**Solution**: Check Python version (must be 3.9+):
+```bash
+python --version
+```
+If needed, create a venv with a specific Python version:
+```bash
+python3.9 -m venv venv
+```
+
+**5. PyBullet GUI not showing**
+```
+GUI window doesn't appear when gui=true
+```
+**Solution**: 
+- GUI mode must be explicitly enabled: `create_simulation(gui=true)`
+- Only ONE GUI simulation allowed per server instance
+- Destroy existing GUI simulation before creating a new one
+- Some systems (servers, Docker) don't support GUI mode - use headless mode instead
+- On Linux, ensure X11 is available: `echo $DISPLAY`
+
+**6. File permission errors**
+```
+PermissionError when saving/loading simulations
+```
+**Solution**: 
+- Ensure write permissions in the target directory
+- Use absolute paths: `/full/path/to/simulation.json`
+- Check disk space: `df -h`
+
+**7. MCP client can't connect to server**
+```
+Claude Desktop shows "Server not responding"
+```
+**Solution**:
+- Verify the `cwd` path in the MCP config is correct
+- Use absolute paths, not relative paths
+- Check that Python can find the src module: `python -c "import src.server"`
+- Restart Claude Desktop after config changes
+- Check Claude Desktop logs for error messages
+
+**8. Simulation behaves unexpectedly**
+```
+Objects fall through the ground or constraints don't work
+```
+**Solution**:
+- Ensure you're stepping the simulation: `step_simulation(sim_id, steps=100)`
+- Check timestep value (default 0.01 is usually good)
+- Verify object masses are positive
+- For ground planes, use a box with large dimensions and mass=1000
+
+**9. URDF loading fails**
+```
+ToolError: Failed to load URDF
+```
+**Solution**:
+- Verify the URDF file path is correct and accessible
+- Use absolute paths for URDF files
+- Check that mesh files referenced in URDF are also accessible
+- Validate URDF syntax with PyBullet directly
+
+**10. Server crashes when creating GUI simulation**
+```
+Server stops responding after create_simulation(gui=true)
+```
+**Solution**:
+- Only one GUI simulation allowed per process
+- If server crashed, restart it
+- Check if another GUI simulation is already running
+- Try headless mode first: `create_simulation(gui=false)`
+
+### Debug Mode
+
+To see detailed error messages, check the server output in your terminal. The server logs all operations and errors.
+
+### Getting Help
+
+If you encounter issues not covered here:
+1. Check the server logs for detailed error messages
+2. Verify your MCP client configuration
+3. Test the server directly with Python to isolate MCP vs. PyBullet issues
+4. Review the PyBullet documentation for physics-specific questions
+
+---
+
+## Troubleshooting
+
 ### Server Not Starting
 
 **Problem**: `ModuleNotFoundError: No module named 'mcp'`
@@ -583,13 +764,15 @@ After exploring the tools:
 
 Planned features for future versions:
 
-- Robot joint control and manipulation
-- Inverse kinematics calculations
-- Joint state queries and monitoring
-- Advanced velocity control
-- Dynamic property modification
+- ~~Robot joint control and manipulation~~ ✅ **Implemented in v1.1.0**
+- ~~Inverse kinematics calculations~~ ✅ **Implemented in v1.1.0**
+- ~~Joint state queries and monitoring~~ ✅ **Implemented in v1.1.0**
+- Advanced velocity control for objects (non-joint)
+- Dynamic property modification (mass, friction, restitution)
 - Ray casting for sensor simulation
 - Camera rendering capabilities
+- Soft body physics
+- Heightfield terrain support
 
 ---
 

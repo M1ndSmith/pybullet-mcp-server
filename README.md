@@ -1,20 +1,32 @@
-9# PyBullet MCP Server
+# PyBullet MCP Server
 
-Version 1.0.0
+Version 1.1.0
 
 A Model Context Protocol (MCP) server that enables AI assistants to interact with PyBullet physics simulations. Build physics-based projects through natural language interactions with AI agents.
 
 ## Features
 
-- **25 MCP Tools**: Comprehensive API for physics simulation control including robot joint control
+- **27 MCP Tools**: Comprehensive API for physics simulation control including robot joint control
 - **Simulation Management**: Create and manage multiple independent physics simulations with configurable gravity
 - **Object Manipulation**: Add primitive shapes (box, sphere, cylinder, capsule) and URDF models with full property control
+- **Robot Control**: Query joint information, control motors (position/velocity/torque), and calculate inverse kinematics
 - **Physics Control**: Apply forces, torques, and step through simulations with configurable timesteps
 - **State Persistence**: Save and load complete simulation states to/from JSON files
-- **Constraints**: Create joints between objects (fixed, revolute, prismatic, spherical)
+- **Constraints**: Create joints between objects (fixed, prismatic, spherical)
 - **Collision Detection**: Query contact points with detailed collision information
 - **Visualization**: Optional GUI mode with debug visualization and camera control
 - **Error Handling**: Comprehensive validation with descriptive error messages
+
+## Important Notes
+
+- **Coordinate Requirements**: All vectors must be provided as complete 3D coordinates [x, y, z]
+  - Gravity: `[0, 0, -9.81]` (not `[-9.81]`)
+  - Positions: `[x, y, z]` (not `[x, y]` or `[x]`)
+  - Forces/Torques: `[fx, fy, fz]` (not `[fx]`)
+  - Orientations: `[x, y, z, w]` quaternion (not `[w]`)
+- **Mass Constraint**: Object mass must be positive (mass > 0). Use large mass (e.g., 1000) for static objects
+- **GUI Limitation**: Only one GUI simulation can be active at a time (PyBullet limitation)
+- **URDF Paths**: Use absolute paths or paths relative to the server's working directory
 
 ## Installation
 
@@ -75,18 +87,22 @@ Once connected to an MCP client (like Claude Desktop), you can interact through 
 ```
 Create a new physics simulation with Earth gravity
 ```
-This calls `create_simulation` with default gravity [0, 0, -9.81].
+This calls `create_simulation` with gravity `[0, 0, -9.81]`.
+
+**Important**: Gravity must be a 3D vector. The server accepts shorthand like `[-9.81]` and expands it to `[0, 0, -9.81]`.
 
 **2. Add objects:**
 ```
 Add a red box at position (0, 0, 1) with dimensions 0.5x0.5x0.5 and mass 1.0
 ```
-This calls `add_box` to create a box object.
+This calls `add_box` to create a box object. Position is automatically expanded to `[0, 0, 1]`.
 
 ```
 Add a sphere at (2, 0, 1) with radius 0.3
 ```
 This calls `add_sphere` to create a sphere.
+
+**Note**: Mass must be positive. For static objects (like ground planes), use large mass values (e.g., 1000).
 
 **3. Run the simulation:**
 ```
@@ -167,7 +183,7 @@ On Windows, use: `"command": "C:\\path\\to\\pybullet-mcp-server\\venv\\Scripts\\
 
 ## Available Tools
 
-The server exposes 25 tools through the MCP protocol:
+The server exposes 27 tools through the MCP protocol:
 
 ### Simulation Management (5 tools)
 - **`create_simulation`**: Initialize a new physics simulation with configurable gravity and optional GUI
@@ -229,7 +245,7 @@ The server exposes 25 tools through the MCP protocol:
 ### Constraint Management (2 tools)
 - **`create_constraint`**: Create a joint between two objects
   - Parameters: `sim_id`, `parent_id` (int), `child_id` (int), `joint_type` (str), `joint_axis` (list[float], optional), `parent_frame_position` (list[float], optional), `child_frame_position` (list[float], optional)
-  - Joint types: "fixed", "revolute", "prismatic", "spherical"
+  - Joint types: "fixed", "prismatic", "spherical"
   - Returns: constraint_id, joint_type
   
 - **`remove_constraint`**: Remove a constraint from the simulation
@@ -320,7 +336,7 @@ Create objects connected by a joint:
 "Create a simulation"
 "Add a box at (0, 0, 2) with dimensions 1x1x1"  # Object 0
 "Add a sphere at (2, 0, 2) with radius 0.5"     # Object 1
-"Create a revolute constraint between object 0 and object 1"
+"Create a fixed constraint between object 0 and object 1"
 "Apply a torque of [0, 0, 10] to object 1"
 "Step the simulation 200 times"
 ```
@@ -351,10 +367,20 @@ Load and control a URDF robot model:
 "How many joints does object 0 have?"
 "Get information about joint 0 of object 0"
 "Get the current state of joint 0"
-"Set joint 0 to position 1.57 with position control"
+"Set joint 0 to position 1.57 with position control and force 100"
 "Step the simulation 100 times"
-"Calculate inverse kinematics for object 0 end-effector at position [0.5, 0, 0.5]"
+"Get the state of joint 0 again to see it moved"
+"Calculate inverse kinematics for object 0 end-effector link 6 at position [0.5, 0, 0.5]"
 ```
+
+**Robot Control Features:**
+- Query number of joints and joint properties (type, limits, axis)
+- Read joint states (position, velocity, forces, torque)
+- Control joints with three modes:
+  - Position control: Move joint to target angle/position
+  - Velocity control: Spin joint at target speed
+  - Torque control: Apply direct torque to joint
+- Calculate inverse kinematics for end-effector positioning
 
 ## Development
 
@@ -364,7 +390,7 @@ Load and control a URDF robot model:
 pybullet-mcp-server/
 ├── src/                          # Source code
 │   ├── __init__.py
-│   ├── server.py                 # FastMCP server with 20 MCP tools
+│   ├── server.py                 # FastMCP server with 27 MCP tools
 │   ├── simulation_manager.py    # Simulation lifecycle management
 │   ├── object_manager.py         # Object creation and manipulation
 │   ├── constraint_manager.py    # Joint and constraint handling
@@ -473,12 +499,70 @@ Simulation states are saved as JSON files with the following structure:
     {
       "constraint_id": 0,
       "parent_id": 0,
-      "child_id": 1,
-      "joint_type": "revolute",
-      "parent_frame_position": [0.0, 0.0, 0.0],
-      "child_frame_position": [0.0, 0.0, 0.0],
-      "joint_axis": [0.0, 0.0, 1.0]
-    }
+### Compatibility Notes
+
+- **Object IDs**: Object IDs are reassigned when loading (may differ from saved IDs)
+- **URDF Files**: URDF file paths must be valid when loading. Use absolute paths for reliability
+- **Simulation ID**: A new simulation ID is generated when loading
+- **Format Version**: Current format is compatible with PyBullet 3.2.5+
+- **Constraints**: Constraints are fully serialized and restored (fixed in v1.1.0)
+
+## Common Issues and Solutions
+
+### Coordinate Errors
+**Problem**: `"force needs a 3 coordinates [x,y,z]"` or similar errors
+
+**Solution**: Always provide complete 3D vectors:
+```python
+# Wrong
+gravity = [-9.81]
+position = [1, 2]
+force = [10]
+
+# Correct
+gravity = [0, 0, -9.81]
+position = [1, 2, 0]
+force = [10, 0, 0]
+```
+
+### Mass Validation Error
+**Problem**: `"Mass must be positive, got 0.0"`
+
+**Solution**: PyBullet requires positive mass. For static objects, use large mass:
+```python
+# Wrong
+add_box(mass=0)  # Error!
+
+# Correct
+add_box(mass=1000)  # Heavy static object
+```
+
+### GUI Window Not Appearing
+**Problem**: GUI window doesn't show when `gui=true`
+
+**Solution**:
+- Only one GUI simulation allowed per server instance
+- Destroy existing GUI simulation before creating a new one
+- Some environments (Docker, SSH without X11) don't support GUI
+- On Linux, ensure X11 is available: `echo $DISPLAY`
+
+### URDF Loading Fails
+**Problem**: `"Failed to load URDF: File not found"`
+
+**Solution**:
+- Use absolute paths: `/full/path/to/robot.urdf`
+- Or use paths relative to server working directory
+- Verify file exists: `ls -la /path/to/robot.urdf`
+- Check mesh files referenced in URDF are also accessible
+
+### Objects Fall Through Ground
+**Problem**: Objects pass through the ground plane
+
+**Solution**:
+- Ensure you're stepping the simulation: `step_simulation(steps=100)`
+- Use appropriate timestep (default 0.01 is usually good)
+- Give ground plane large dimensions and high mass
+- Verify objects have positive mass
   ]
 }
 ```
@@ -509,13 +593,15 @@ Simulation states are saved as JSON files with the following structure:
 
 Planned features for upcoming versions:
 
-- Robot joint control and manipulation
-- Inverse kinematics calculations
-- Joint state queries and monitoring
-- Advanced velocity control
-- Dynamic property modification
+- ~~Robot joint control and manipulation~~ ✅ **Implemented in v1.1.0**
+- ~~Inverse kinematics calculations~~ ✅ **Implemented in v1.1.0**
+- ~~Joint state queries and monitoring~~ ✅ **Implemented in v1.1.0**
+- Advanced velocity control for objects (non-joint)
+- Dynamic property modification (mass, friction, restitution)
 - Ray casting for sensor simulation
 - Camera rendering capabilities
+- Soft body physics
+- Heightfield terrain support
 
 ## Troubleshooting
 
@@ -614,7 +700,7 @@ MCP Client (Claude Desktop)
          ↓
    MCP Protocol
          ↓
-FastMCP Server (20 tools)
+FastMCP Server (27 tools)
          ↓
 Manager Classes (helpers)
          ↓
@@ -622,7 +708,7 @@ PyBullet Physics Engine
 ```
 
 **Key Components:**
-- **FastMCP Server** (`src/server.py`): Exposes 25 MCP tools using `@mcp.tool` decorators
+- **FastMCP Server** (`src/server.py`): Exposes 27 MCP tools using `@mcp.tool` decorators
 - **SimulationManager**: Manages PyBullet physics clients and simulation lifecycle
 - **ObjectManager**: Handles object creation, manipulation, and state queries
 - **ConstraintManager**: Creates and manages joints between objects
