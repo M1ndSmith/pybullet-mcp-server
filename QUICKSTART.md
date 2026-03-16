@@ -1,7 +1,5 @@
 # PyBullet MCP Server - Quick Start Guide
 
-Version 1.1.0
-
 This guide will help you start the server and explore all available tools through example prompts.
 
 ## Important: Coordinate Requirements
@@ -17,7 +15,7 @@ Before starting, note these critical requirements:
 ## Table of Contents
 
 1. [Starting the Server](#starting-the-server)
-2. [Configuring Claude Desktop](#configuring-claude-desktop)
+2. [MCP Configuration](#configuration-file)
 3. [Example Prompts by Category](#example-prompts-by-category)
 4. [Complete Exploration Workflow](#complete-exploration-workflow)
 5. [Troubleshooting](#troubleshooting)
@@ -50,49 +48,22 @@ Leave this terminal window open while using the server. The server will log all 
 
 ---
 
-## Configuring Claude Desktop
+## Configuration File
 
-### macOS Configuration
-
-Edit: `~/Library/Application Support/Claude/claude_desktop_config.json`
+Add the following to your MCP client configuration:
 
 ```json
 {
   "mcpServers": {
     "pybullet": {
-      "command": "/absolute/path/to/pybullet_mcp/venv/bin/python",
-      "args": ["-m", "src.server"],
-      "cwd": "/absolute/path/to/pybullet_mcp"
+      "url": "http://localhost:8000/mcp",
+      "disabled": false
     }
   }
 }
 ```
 
-### Windows Configuration
-
-Edit: `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "pybullet": {
-      "command": "C:\\path\\to\\pybullet_mcp\\venv\\Scripts\\python.exe",
-      "args": ["-m", "src.server"],
-      "cwd": "C:\\path\\to\\pybullet_mcp"
-    }
-  }
-}
-```
-
-### Linux Configuration
-
-Similar to macOS, adjust paths accordingly.
-
-**Important**: Replace `/absolute/path/to/pybullet_mcp` with your actual project directory path.
-
-### Restart Claude Desktop
-
-After saving the configuration, restart Claude Desktop for changes to take effect.
+Restart your MCP client after saving the configuration.
 
 ---
 
@@ -221,7 +192,96 @@ Remove constraint 1 from the simulation
 
 ---
 
-### 4. Collision Detection (2 tools)
+### 4. Object Dynamics (3 tools)
+
+#### Set Object Velocity Directly
+```
+Set the velocity of object 1 to [5, 0, 0] (launch it sideways)
+```
+
+```
+Stop object 2 completely (set linear and angular velocity to zero)
+```
+
+```
+Make object 3 spin in place with angular velocity [0, 0, 10]
+```
+
+#### Change Physics Properties at Runtime
+```
+Make object 1 slippery by setting lateral friction to 0.05
+```
+
+```
+Make object 2 bouncy by setting restitution to 0.9
+```
+
+```
+Change the mass of object 0 to 5.0 kg
+```
+
+#### Query Physics Properties
+```
+Get the dynamics info for object 1 (mass, friction, restitution, etc.)
+```
+
+---
+
+### 5. Ray Casting (2 tools)
+
+#### Single Ray Test
+```
+Cast a ray from [0, 0, 1] to [10, 0, 1] and check if it hits anything
+```
+
+```
+Check line-of-sight from [0, 0, 2] to [5, 5, 2]
+```
+
+#### Batch Ray Test (Lidar Simulation)
+```
+Cast 4 rays from [0, 0, 1] outward in the cardinal directions to distance 5
+```
+
+---
+
+### 6. Camera Rendering (4 tools)
+
+#### Compute View Matrix
+```
+Compute a view matrix with camera at [5, 5, 3] looking at the origin, up vector [0, 0, 1]
+```
+
+#### Compute View Matrix from Yaw/Pitch (Orbit Camera)
+```
+Compute a view matrix at distance 5, yaw 45 degrees, pitch -30 degrees, looking at [0, 0, 0]
+```
+
+#### Compute Projection Matrix
+```
+Compute a projection matrix with FOV 60, aspect ratio 1.33, near plane 0.1, far plane 100
+```
+
+#### Render Camera Image
+```
+Render a 640x480 image using the view and projection matrices I just computed
+```
+
+**Full camera workflow:**
+```
+# 1. Compute view matrix (orbit style)
+Compute view matrix from yaw/pitch: distance=5, yaw=45, pitch=-30, target=[0,0,0]
+
+# 2. Compute projection matrix
+Compute projection matrix: fov=60, aspect=1.333, near=0.1, far=100
+
+# 3. Render image
+Render a 640x480 camera image using those matrices
+```
+
+---
+
+### 7. Collision Detection (2 tools)
 
 #### Query All Collisions
 ```
@@ -243,7 +303,7 @@ Get collision information between object 2 and object 3
 
 ---
 
-### 5. Visualization (2 tools)
+### 8. Visualization (2 tools)
 
 #### Enable Debug Visualization
 ```
@@ -265,7 +325,7 @@ Move the camera to view from above: distance 10, yaw 0, pitch -89, target (0, 0,
 
 ---
 
-### 6. Persistence (2 tools)
+### 9. Persistence (2 tools)
 
 #### Save Simulation
 ```
@@ -287,7 +347,7 @@ Load the simulation from /tmp/my_simulation.json with GUI enabled
 
 ---
 
-### 7. Robot Control (5 tools)
+### 10. Robot Control (5 tools)
 
 #### Query Joint Information
 ```
@@ -379,7 +439,7 @@ Get the state of joint 6
 
 ## Complete Exploration Workflow
 
-Here's a complete sequence of prompts that exercises all 27 tools:
+Here's a complete sequence of prompts that exercises all 37 tools:
 
 ### Phase 1: Setup (Simulation Management)
 ```
@@ -606,14 +666,13 @@ PermissionError when saving/loading simulations
 
 **7. MCP client can't connect to server**
 ```
-Claude Desktop shows "Server not responding"
+Server not responding
 ```
 **Solution**:
-- Verify the `cwd` path in the MCP config is correct
-- Use absolute paths, not relative paths
-- Check that Python can find the src module: `python -c "import src.server"`
-- Restart Claude Desktop after config changes
-- Check Claude Desktop logs for error messages
+- Verify the server is running: `python -m src.server`
+- Check the URL in your MCP config matches the server port (default: `http://localhost:8000/mcp`)
+- Restart your MCP client after config changes
+- Check the server terminal output for error messages
 
 **8. Simulation behaves unexpectedly**
 ```
@@ -659,70 +718,6 @@ If you encounter issues not covered here:
 
 ---
 
-## Troubleshooting
-
-### Server Not Starting
-
-**Problem**: `ModuleNotFoundError: No module named 'mcp'`
-
-**Solution**:
-```bash
-source venv/bin/activate
-pip install fastmcp pybullet
-```
-
-### Claude Desktop Can't Connect
-
-**Problem**: "Server not responding" in Claude Desktop
-
-**Solutions**:
-1. Check that paths in `claude_desktop_config.json` are absolute, not relative
-2. Verify the Python path points to your venv Python
-3. Restart Claude Desktop after config changes
-4. Check Claude Desktop logs for error messages
-
-### GUI Not Showing
-
-**Problem**: GUI window doesn't appear when `gui=true`
-
-**Solutions**:
-1. Only ONE GUI simulation allowed per process
-2. Destroy existing GUI simulation before creating a new one
-3. Some systems (servers, Docker) don't support GUI - use headless mode
-4. On Linux, ensure X11 is available: `echo $DISPLAY`
-
-### URDF Loading Fails
-
-**Problem**: `ToolError: File not found: robot.urdf`
-
-**Solutions**:
-1. Use absolute paths for URDF files
-2. Verify the file exists: `ls -la /path/to/robot.urdf`
-3. Check that mesh files referenced in URDF are also accessible
-4. Test with PyBullet's built-in URDFs first
-
-### Objects Fall Through Ground
-
-**Problem**: Objects pass through the ground plane
-
-**Solutions**:
-1. Ensure you're stepping the simulation: `step_simulation(sim_id, steps=100)`
-2. Check timestep value (default 0.01 is usually good)
-3. Verify ground plane has large dimensions and high mass
-4. Check that objects have positive mass
-
-### Simulation Runs Slowly
-
-**Problem**: Simulation takes a long time to step
-
-**Solutions**:
-1. Use headless mode (GUI adds overhead)
-2. Increase timestep for faster (less accurate) simulation
-3. Reduce number of objects
-4. Use primitive shapes instead of complex URDF meshes
-
----
-
 ## Tips for Effective Use
 
 ### 1. Start Simple
@@ -752,27 +747,10 @@ After loading URDF or creating objects, note the object IDs returned for later r
 
 After exploring the tools:
 
-1. **Read the full documentation**: See `README.md` for detailed API reference
-2. **Check the architecture**: See `docs/ARCHITECTURE.md` for system design
-3. **Review examples**: See `docs/TOOLS.md` for usage patterns
-4. **Run tests**: Execute `pytest` to see property-based testing in action
-5. **Explore PyBullet**: Learn more at https://pybullet.org/
-
----
-
-## Future Enhancements
-
-Planned features for future versions:
-
-- ~~Robot joint control and manipulation~~ ✅ **Implemented in v1.1.0**
-- ~~Inverse kinematics calculations~~ ✅ **Implemented in v1.1.0**
-- ~~Joint state queries and monitoring~~ ✅ **Implemented in v1.1.0**
-- Advanced velocity control for objects (non-joint)
-- Dynamic property modification (mass, friction, restitution)
-- Ray casting for sensor simulation
-- Camera rendering capabilities
-- Soft body physics
-- Heightfield terrain support
+1. Read `README.md` for the full API reference
+2. Run `pytest` to see the property-based test suite in action
+3. Find built-in PyBullet URDFs to load: `python -c "import pybullet_data; print(pybullet_data.getDataPath())"`
+4. Learn more about PyBullet at https://pybullet.org/
 
 ---
 

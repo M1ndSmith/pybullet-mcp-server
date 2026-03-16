@@ -91,7 +91,7 @@ class ObjectManager:
             dimensions: Shape dimensions. For box: [half_x, half_y, half_z],
                        for sphere: [radius], for cylinder/capsule: [radius, height].
             position: Initial position [x, y, z].
-            mass: Object mass in kg. Default is 1.0.
+            mass: Object mass in kg. Use 0 for static objects (infinite mass). Default is 1.0.
             color: RGBA color [r, g, b, a]. Default is white [1, 1, 1, 1].
             friction: Friction coefficient. Default is 0.5.
             restitution: Restitution (bounciness) coefficient. Default is 0.5.
@@ -100,7 +100,11 @@ class ObjectManager:
             PyBullet object ID (integer).
             
         Raises:
-            ValueError: If simulation not found or invalid shape type.
+            ValueError: If simulation not found, invalid shape type, or negative mass.
+            
+        Note:
+            mass=0 creates a static object with infinite mass that won't move.
+            This is useful for ground planes, walls, and other fixed obstacles.
         """
         # Get simulation context
         sim = self.simulation_manager.get_simulation(sim_id)
@@ -111,9 +115,9 @@ class ObjectManager:
                 f"Invalid shape: {shape}. Must be one of: {list(SHAPE_MAP.keys())}"
             )
         
-        # Validate mass is positive
-        if mass <= 0:
-            raise ValueError(f"Mass must be positive, got {mass}")
+        # Validate mass is non-negative (0 for static objects, >0 for dynamic)
+        if mass < 0:
+            raise ValueError(f"Mass must be non-negative (use 0 for static objects), got {mass}")
         
         # Validate dimensions are positive
         if not dimensions:
@@ -426,4 +430,197 @@ class ObjectManager:
             "orientation": list(orn),
             "linear_velocity": list(lin_vel),
             "angular_velocity": list(ang_vel)
+        }
+    def set_object_velocity(
+        self,
+        sim_id: str,
+        object_id: int,
+        linear_velocity: Optional[List[float]] = None,
+        angular_velocity: Optional[List[float]] = None
+    ) -> None:
+        """Set an object's linear and/or angular velocity directly.
+
+        This allows you to instantly change an object's velocity without applying forces.
+        Useful for resetting velocities, launching projectiles, or teleporting objects
+        with momentum.
+
+        Args:
+            sim_id: UUID string identifying the simulation.
+            object_id: PyBullet object ID.
+            linear_velocity: Linear velocity [vx, vy, vz] in m/s. If None, keeps current.
+            angular_velocity: Angular velocity [wx, wy, wz] in rad/s. If None, keeps current.
+
+        Raises:
+            ValueError: If simulation not found or both velocities are None.
+
+        Note:
+            At least one of linear_velocity or angular_velocity must be provided.
+            To stop an object, use [0, 0, 0] for both velocities.
+        """
+        # Get simulation context
+        sim = self.simulation_manager.get_simulation(sim_id)
+
+        # Validate object exists in simulation
+        if object_id not in sim.objects:
+            raise ValueError(f"Object {object_id} not found in simulation {sim_id}")
+
+        # Validate at least one velocity is provided
+        if linear_velocity is None and angular_velocity is None:
+            raise ValueError("At least one of linear_velocity or angular_velocity must be provided")
+
+        # Get current velocities if not provided
+        if linear_velocity is None or angular_velocity is None:
+            current_lin_vel, current_ang_vel = p.getBaseVelocity(
+                object_id,
+                physicsClientId=sim.client_id
+            )
+            if linear_velocity is None:
+                linear_velocity = list(current_lin_vel)
+            if angular_velocity is None:
+                angular_velocity = list(current_ang_vel)
+
+        # Set velocities
+        p.resetBaseVelocity(
+            object_id,
+            linearVelocity=linear_velocity,
+            angularVelocity=angular_velocity,
+            physicsClientId=sim.client_id
+        )
+    def change_dynamics(
+        self,
+        sim_id: str,
+        object_id: int,
+        link_index: int = -1,
+        mass: Optional[float] = None,
+        lateral_friction: Optional[float] = None,
+        spinning_friction: Optional[float] = None,
+        rolling_friction: Optional[float] = None,
+        restitution: Optional[float] = None,
+        linear_damping: Optional[float] = None,
+        angular_damping: Optional[float] = None,
+        contact_stiffness: Optional[float] = None,
+        contact_damping: Optional[float] = None
+    ) -> None:
+        """Modify object physics properties at runtime.
+
+        This allows changing physical properties after object creation, useful for
+        testing failure scenarios, simulating wear/damage, or dynamic environments.
+
+        Args:
+            sim_id: UUID string identifying the simulation.
+            object_id: PyBullet object ID.
+            link_index: Link index (-1 for base). Default is -1.
+            mass: New mass in kg. None to keep current.
+            lateral_friction: Friction coefficient. None to keep current.
+            spinning_friction: Spinning friction coefficient. None to keep current.
+            rolling_friction: Rolling friction coefficient. None to keep current.
+            restitution: Restitution (bounciness) coefficient. None to keep current.
+            linear_damping: Linear damping coefficient. None to keep current.
+            angular_damping: Angular damping coefficient. None to keep current.
+            contact_stiffness: Contact stiffness. None to keep current.
+            contact_damping: Contact damping. None to keep current.
+
+        Raises:
+            ValueError: If simulation not found or no properties specified.
+
+        Note:
+            At least one property must be specified. Pass None for properties
+            you want to keep unchanged.
+        """
+        # Get simulation context
+        sim = self.simulation_manager.get_simulation(sim_id)
+
+        # Validate object exists in simulation
+        if object_id not in sim.objects:
+            raise ValueError(f"Object {object_id} not found in simulation {sim_id}")
+
+        # Validate at least one property is specified
+        if all(prop is None for prop in [
+            mass, lateral_friction, spinning_friction, rolling_friction,
+            restitution, linear_damping, angular_damping,
+            contact_stiffness, contact_damping
+        ]):
+            raise ValueError("At least one property must be specified")
+
+        # Build kwargs for changeDynamics
+        kwargs = {"physicsClientId": sim.client_id}
+
+        if mass is not None:
+            if mass < 0:
+                raise ValueError(f"Mass must be non-negative, got {mass}")
+            kwargs["mass"] = mass
+        if lateral_friction is not None:
+            kwargs["lateralFriction"] = lateral_friction
+        if spinning_friction is not None:
+            kwargs["spinningFriction"] = spinning_friction
+        if rolling_friction is not None:
+            kwargs["rollingFriction"] = rolling_friction
+        if restitution is not None:
+            kwargs["restitution"] = restitution
+        if linear_damping is not None:
+            kwargs["linearDamping"] = linear_damping
+        if angular_damping is not None:
+            kwargs["angularDamping"] = angular_damping
+        if contact_stiffness is not None:
+            kwargs["contactStiffness"] = contact_stiffness
+        if contact_damping is not None:
+            kwargs["contactDamping"] = contact_damping
+
+        # Apply dynamics changes
+        p.changeDynamics(object_id, link_index, **kwargs)
+
+    def get_dynamics_info(
+        self,
+        sim_id: str,
+        object_id: int,
+        link_index: int = -1
+    ) -> Dict[str, Any]:
+        """Query current dynamic properties of an object.
+
+        Args:
+            sim_id: UUID string identifying the simulation.
+            object_id: PyBullet object ID.
+            link_index: Link index (-1 for base). Default is -1.
+
+        Returns:
+            Dictionary containing:
+                - mass: Object mass in kg
+                - lateral_friction: Lateral friction coefficient
+                - local_inertia_diagonal: Inertia tensor diagonal [Ixx, Iyy, Izz]
+                - local_inertia_pos: Inertia frame position
+                - local_inertia_orn: Inertia frame orientation
+                - restitution: Restitution coefficient
+                - rolling_friction: Rolling friction coefficient
+                - spinning_friction: Spinning friction coefficient
+                - contact_damping: Contact damping
+                - contact_stiffness: Contact stiffness
+                - body_type: Body type (1=dynamic, 2=multibody, 3=soft body)
+                - collision_margin: Collision margin
+
+        Raises:
+            ValueError: If simulation not found.
+        """
+        # Get simulation context
+        sim = self.simulation_manager.get_simulation(sim_id)
+
+        # Validate object exists in simulation
+        if object_id not in sim.objects:
+            raise ValueError(f"Object {object_id} not found in simulation {sim_id}")
+
+        # Get dynamics info
+        info = p.getDynamicsInfo(object_id, link_index, physicsClientId=sim.client_id)
+
+        return {
+            "mass": info[0],
+            "lateral_friction": info[1],
+            "local_inertia_diagonal": list(info[2]),
+            "local_inertia_pos": list(info[3]),
+            "local_inertia_orn": list(info[4]),
+            "restitution": info[5],
+            "rolling_friction": info[6],
+            "spinning_friction": info[7],
+            "contact_damping": info[8],
+            "contact_stiffness": info[9],
+            "body_type": info[10],
+            "collision_margin": info[11]
         }

@@ -1,12 +1,10 @@
 # PyBullet MCP Server
 
-Version 1.1.0
-
 A Model Context Protocol (MCP) server that enables AI assistants to interact with PyBullet physics simulations. Build physics-based projects through natural language interactions with AI agents.
 
 ## Features
 
-- **27 MCP Tools**: Comprehensive API for physics simulation control including robot joint control
+- **37 MCP Tools**: Comprehensive API for physics simulation control including robot joint control
 - **Simulation Management**: Create and manage multiple independent physics simulations with configurable gravity
 - **Object Manipulation**: Add primitive shapes (box, sphere, cylinder, capsule) and URDF models with full property control
 - **Robot Control**: Query joint information, control motors (position/velocity/torque), and calculate inverse kinematics
@@ -27,6 +25,7 @@ A Model Context Protocol (MCP) server that enables AI assistants to interact wit
 - **Mass Constraint**: Object mass must be positive (mass > 0). Use large mass (e.g., 1000) for static objects
 - **GUI Limitation**: Only one GUI simulation can be active at a time (PyBullet limitation)
 - **URDF Paths**: Use absolute paths or paths relative to the server's working directory
+- **Revolute Joints**: `create_constraint` does not support `"revolute"` — use `generate_revolute_joint` + `load_urdf` instead. Always pass an explicit `output_path` inside the workspace to `generate_revolute_joint`, otherwise the generated URDF lands in `/tmp/` and `load_urdf` will reject it.
 
 ## Installation
 
@@ -134,56 +133,35 @@ Load the simulation from simulation.json
 ```
 This calls `load_simulation` to restore the saved state.
 
-## MCP Client Configuration
+## MCP Configuration
 
-### Claude Desktop Setup
-
-To use this server with Claude Desktop, add the following to your MCP configuration file:
-
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+To use this server with Cursor or any other MCP-compatible client, add the following to your MCP configuration file:
 
 ```json
 {
   "mcpServers": {
     "pybullet": {
-      "command": "python",
-      "args": ["-m", "src.server"],
-      "cwd": "/absolute/path/to/pybullet-mcp-server",
-      "env": {
-        "PYTHONPATH": "/absolute/path/to/pybullet-mcp-server"
-      }
+      "url": "http://localhost:8000/mcp",
+      "disabled": false
     }
   }
 }
 ```
 
-**Important**: 
-- Replace `/absolute/path/to/pybullet-mcp-server` with the actual path to your project directory
-- Ensure the virtual environment is activated or use the full path to the Python interpreter in the venv
-- Restart Claude Desktop after updating the configuration
+The server runs HTTP transport by default. You can change the transport method by editing the entry point in `server.py`:
 
-### Alternative: Using Virtual Environment Python
-
-If you're using a virtual environment, specify the venv Python directly:
-
-```json
-{
-  "mcpServers": {
-    "pybullet": {
-      "command": "/absolute/path/to/pybullet-mcp-server/venv/bin/python",
-      "args": ["-m", "src.server"],
-      "cwd": "/absolute/path/to/pybullet-mcp-server"
-    }
-  }
-}
+```python
+if __name__ == "__main__":
+    mcp.run(transport="http", port=8000)
 ```
 
-On Windows, use: `"command": "C:\\path\\to\\pybullet-mcp-server\\venv\\Scripts\\python.exe"`
+Restart your MCP client after updating the configuration.
+
+
 
 ## Available Tools
 
-The server exposes 27 tools through the MCP protocol:
+The server exposes 37 tools through the MCP protocol:
 
 ### Simulation Management (5 tools)
 - **`create_simulation`**: Initialize a new physics simulation with configurable gravity and optional GUI
@@ -242,15 +220,70 @@ The server exposes 27 tools through the MCP protocol:
   - Parameters: `sim_id`, `object_id` (int), `torque` (list[float])
   - Returns: confirmation message
 
+- **`set_object_velocity`**: Set an object's linear and/or angular velocity directly
+  - Parameters: `sim_id`, `object_id` (int), `linear_velocity` (list[float], optional), `angular_velocity` (list[float], optional)
+  - Returns: confirmation message
+
+- **`change_dynamics`**: Modify object physics properties at runtime
+  - Parameters: `sim_id`, `object_id` (int), `link_index` (int, default: -1), `mass` (float, optional), `lateral_friction` (float, optional), `spinning_friction` (float, optional), `rolling_friction` (float, optional), `restitution` (float, optional), `linear_damping` (float, optional), `angular_damping` (float, optional), `contact_stiffness` (float, optional), `contact_damping` (float, optional)
+  - Returns: confirmation message
+
+- **`get_dynamics_info`**: Query current dynamic properties of an object
+  - Parameters: `sim_id`, `object_id` (int), `link_index` (int, default: -1)
+  - Returns: mass, lateral_friction, local_inertia_diagonal, restitution, rolling_friction, spinning_friction, contact_damping, contact_stiffness, body_type, collision_margin
+
+### Ray Casting (2 tools)
+- **`ray_test`**: Cast a single ray to detect obstacles and measure distances
+  - Parameters: `sim_id`, `ray_from` (list[float]), `ray_to` (list[float])
+  - Returns: hit (bool), object_id, link_index, hit_fraction, hit_position, hit_normal
+
+- **`ray_test_batch`**: Cast multiple rays efficiently for lidar/sensor simulation
+  - Parameters: `sim_id`, `rays_from` (list[list[float]]), `rays_to` (list[list[float]])
+  - Returns: list of hit results (same fields as ray_test per ray)
+
+### Camera Rendering (4 tools)
+- **`compute_view_matrix`**: Compute view matrix from camera eye/target/up vectors
+  - Parameters: `camera_eye_position` (list[float]), `camera_target_position` (list[float]), `camera_up_vector` (list[float])
+  - Returns: view matrix as list of 16 floats
+
+- **`compute_view_matrix_from_yaw_pitch`**: Compute view matrix from spherical coordinates (orbit camera)
+  - Parameters: `distance` (float), `yaw` (float), `pitch` (float), `target_position` (list[float]), `up_axis_index` (int, default: 2)
+  - Returns: view matrix as list of 16 floats
+
+- **`compute_projection_matrix`**: Compute projection matrix from camera parameters
+  - Parameters: `fov` (float), `aspect` (float), `near_plane` (float), `far_plane` (float)
+  - Returns: projection matrix as list of 16 floats
+
+- **`get_camera_image`**: Render RGB, depth, and segmentation images from a virtual camera
+  - Parameters: `sim_id`, `width` (int), `height` (int), `view_matrix` (list[float]), `projection_matrix` (list[float]), `renderer` (str, default: "ER_BULLET_HARDWARE_OPENGL")
+  - Returns: width, height, rgb (base64 PNG), depth (list[float]), segmentation (list[int])
+
 ### Constraint Management (2 tools)
 - **`create_constraint`**: Create a joint between two objects
   - Parameters: `sim_id`, `parent_id` (int), `child_id` (int), `joint_type` (str), `joint_axis` (list[float], optional), `parent_frame_position` (list[float], optional), `child_frame_position` (list[float], optional)
   - Joint types: "fixed", "prismatic", "spherical"
   - Returns: constraint_id, joint_type
+  - Note: `"revolute"` is NOT supported here — use `generate_revolute_joint` + `load_urdf` instead.
   
 - **`remove_constraint`**: Remove a constraint from the simulation
   - Parameters: `sim_id`, `constraint_id` (int)
   - Returns: confirmation message
+
+### Revolute (Hinge) Joints — Workaround
+
+PyBullet's runtime constraint API does not support revolute joints. The workaround is a two-step process using these two tools:
+
+**Step 1 — Generate a URDF with the revolute joint:**
+- **`generate_revolute_joint`**: Generates a URDF file containing two shapes connected by a revolute joint
+  - Parameters: `parent_shape` (str: "box"/"sphere"/"cylinder"), `child_shape` (str), `parent_dimensions` (list[float]), `child_dimensions` (list[float]), `parent_mass` (float), `child_mass` (float), `joint_axis` (list[float]), `joint_origin` (list[float], optional), `joint_lower_limit` (float, default: -π), `joint_upper_limit` (float, default: π), `max_effort` (float), `max_velocity` (float), `output_path` (str)
+  - Returns: urdf_path, parent_shape, child_shape, joint_type, joint_axis, joint_limits
+  -  **`output_path` must be set to a path inside the server's working directory.** If omitted, the file is written to the system temp directory (`/tmp/`) which is outside the allowed path and will cause `load_urdf` to fail with an access denied error.
+
+**Step 2 — Load the generated URDF:**
+- Call `load_urdf` with the `urdf_path` returned from `generate_revolute_joint`
+- Then use `set_joint_motor_control` to drive the joint
+
+
 
 ### Collision Detection (2 tools)
 - **`get_all_collisions`**: Query all contact points in the simulation
@@ -321,7 +354,7 @@ Create a stack of objects:
 
 ```python
 "Create a simulation"
-"Add a box at (0, 0, 0.5) with dimensions 10x10x1 and mass 0"  # Ground
+"Add a box at (0, 0, 0.5) with dimensions 10x10x1 and mass 1000"  # Ground
 "Add a box at (0, 0, 1.5) with dimensions 1x1x1"
 "Add a sphere at (0, 0, 3) with radius 0.5"
 "Step the simulation 300 times"
@@ -382,87 +415,6 @@ Load and control a URDF robot model:
   - Torque control: Apply direct torque to joint
 - Calculate inverse kinematics for end-effector positioning
 
-## Development
-
-### Project Structure
-
-```
-pybullet-mcp-server/
-├── src/                          # Source code
-│   ├── __init__.py
-│   ├── server.py                 # FastMCP server with 27 MCP tools
-│   ├── simulation_manager.py    # Simulation lifecycle management
-│   ├── object_manager.py         # Object creation and manipulation
-│   ├── constraint_manager.py    # Joint and constraint handling
-│   ├── persistence.py            # Save/load functionality
-│   └── collision_detection.py   # Collision query handling
-├── tests/                        # Test suite
-│   ├── unit/                     # Unit tests for each component
-│   ├── property/                 # Property-based tests (Hypothesis)
-│   └── integration/              # End-to-end workflow tests
-├── venv/                         # Virtual environment (created by you)
-├── pyproject.toml                # Project configuration
-└── README.md                     # This file
-```
-
-### Running Tests
-
-Activate the virtual environment first:
-```bash
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-Run all tests:
-```bash
-pytest
-```
-
-Run specific test categories:
-```bash
-pytest tests/unit/              # Unit tests only
-pytest tests/property/          # Property-based tests only
-pytest tests/integration/       # Integration tests only
-```
-
-Run with verbose output:
-```bash
-pytest -v
-```
-
-Run with coverage report:
-```bash
-pytest --cov=src --cov-report=html
-open htmlcov/index.html  # View coverage report
-```
-
-### Code Quality
-
-The project uses modern Python tooling for code quality:
-
-**Format code with Black:**
-```bash
-black src tests
-```
-
-**Lint with Ruff:**
-```bash
-ruff check src tests
-```
-
-**Type check with mypy:**
-```bash
-mypy src
-```
-
-### Testing Strategy
-
-The project uses three types of tests:
-
-1. **Unit Tests**: Test individual components in isolation
-2. **Property-Based Tests**: Use Hypothesis to test properties across random inputs (100+ iterations per test)
-3. **Integration Tests**: Test complete workflows end-to-end
-
-All 21 correctness properties from the design document are validated with property-based tests.
 
 ## Persistence File Format
 
@@ -499,13 +451,20 @@ Simulation states are saved as JSON files with the following structure:
     {
       "constraint_id": 0,
       "parent_id": 0,
+      "child_id": 1,
+      "joint_type": "fixed"
+    }
+  ]
+}
+```
+
 ### Compatibility Notes
 
 - **Object IDs**: Object IDs are reassigned when loading (may differ from saved IDs)
 - **URDF Files**: URDF file paths must be valid when loading. Use absolute paths for reliability
 - **Simulation ID**: A new simulation ID is generated when loading
 - **Format Version**: Current format is compatible with PyBullet 3.2.5+
-- **Constraints**: Constraints are fully serialized and restored (fixed in v1.1.0)
+- **Constraints**: Constraints are fully serialized and restored
 
 ## Common Issues and Solutions
 
@@ -541,8 +500,8 @@ add_box(mass=1000)  # Heavy static object
 **Problem**: GUI window doesn't show when `gui=true`
 
 **Solution**:
-- Only one GUI simulation allowed per server instance
-- Destroy existing GUI simulation before creating a new one
+- Only one GUI simulation is allowed per server instance
+- Destroy the existing GUI simulation before creating a new one
 - Some environments (Docker, SSH without X11) don't support GUI
 - On Linux, ensure X11 is available: `echo $DISPLAY`
 
@@ -551,57 +510,19 @@ add_box(mass=1000)  # Heavy static object
 
 **Solution**:
 - Use absolute paths: `/full/path/to/robot.urdf`
-- Or use paths relative to server working directory
-- Verify file exists: `ls -la /path/to/robot.urdf`
-- Check mesh files referenced in URDF are also accessible
+- Or use paths relative to the server's working directory
+- Verify the file exists: `ls -la /path/to/robot.urdf`
+- Check that mesh files referenced in the URDF are also accessible
 
 ### Objects Fall Through Ground
 **Problem**: Objects pass through the ground plane
 
 **Solution**:
 - Ensure you're stepping the simulation: `step_simulation(steps=100)`
-- Use appropriate timestep (default 0.01 is usually good)
-- Give ground plane large dimensions and high mass
+- Use an appropriate timestep (default 0.01 is usually good)
+- Give the ground plane large dimensions and high mass (e.g., 1000)
 - Verify objects have positive mass
-  ]
-}
-```
 
-### Compatibility Notes
-
-- **Object IDs**: Object IDs are reassigned when loading (may differ from saved IDs)
-- **URDF Files**: URDF file paths must be valid when loading
-- **Simulation ID**: A new simulation ID is generated when loading
-- **Format Version**: Current format is compatible with PyBullet 3.2.5+
-
-## Compatibility
-
-- **Python**: 3.9, 3.10, 3.11, 3.12
-- **PyBullet**: 3.2.5 or higher
-- **FastMCP**: 0.3.5 or higher (latest recommended)
-- **Operating Systems**: Linux, macOS, Windows
-- **MCP Clients**: Claude Desktop, any MCP-compatible client
-
-### Technical Notes
-
-- Only one GUI simulation can be active at a time (PyBullet limitation)
-- URDF files must be accessible from the server's working directory
-- Large simulations (1000+ objects) may impact performance
-- GUI mode not available in headless environments (Docker, SSH without X11)
-
-### Future Enhancements
-
-Planned features for upcoming versions:
-
-- ~~Robot joint control and manipulation~~ ✅ **Implemented in v1.1.0**
-- ~~Inverse kinematics calculations~~ ✅ **Implemented in v1.1.0**
-- ~~Joint state queries and monitoring~~ ✅ **Implemented in v1.1.0**
-- Advanced velocity control for objects (non-joint)
-- Dynamic property modification (mass, friction, restitution)
-- Ray casting for sensor simulation
-- Camera rendering capabilities
-- Soft body physics
-- Heightfield terrain support
 
 ## Troubleshooting
 
@@ -650,14 +571,13 @@ PermissionError when saving/loading simulations
 
 **5. MCP client can't connect to server**
 ```
-Claude Desktop shows "Server not responding"
+Server not responding
 ```
 **Solution**:
-- Verify the `cwd` path in the MCP config is correct
-- Use absolute paths, not relative paths
-- Check that Python can find the src module: `python -c "import src.server"`
-- Restart Claude Desktop after config changes
-- Check Claude Desktop logs for error messages
+- Verify the server is running: `python -m src.server`
+- Check the URL in your MCP config matches the server port (default: `http://localhost:8000/mcp`)
+- Restart your MCP client after config changes
+- Check the server terminal output for error messages
 
 **6. Simulation behaves unexpectedly**
 ```
@@ -667,7 +587,7 @@ Objects fall through the ground or constraints don't work
 - Ensure you're stepping the simulation: `step_simulation(sim_id, steps=100)`
 - Check timestep value (default 0.01 is usually good)
 - Verify object masses are positive
-- For ground planes, use a box with large dimensions and mass=0
+- For ground planes, use a box with large dimensions and mass=1000
 
 **7. URDF loading fails**
 ```
@@ -700,7 +620,7 @@ MCP Client (Claude Desktop)
          ↓
    MCP Protocol
          ↓
-FastMCP Server (27 tools)
+FastMCP Server (37 tools)
          ↓
 Manager Classes (helpers)
          ↓
@@ -708,7 +628,7 @@ PyBullet Physics Engine
 ```
 
 **Key Components:**
-- **FastMCP Server** (`src/server.py`): Exposes 27 MCP tools using `@mcp.tool` decorators
+- **FastMCP Server** (`src/server.py`): Exposes 37 MCP tools using `@mcp.tool` decorators
 - **SimulationManager**: Manages PyBullet physics clients and simulation lifecycle
 - **ObjectManager**: Handles object creation, manipulation, and state queries
 - **ConstraintManager**: Creates and manages joints between objects

@@ -9,6 +9,9 @@ from .object_manager import ObjectManager
 from .constraint_manager import ConstraintManager
 from .collision_detection import CollisionQueryHandler
 from .persistence import PersistenceHandler
+from .urdf_generator import generate_revolute_joint_urdf
+from .ray_casting import RayCastingHandler
+from .camera_rendering import CameraRenderer
 
 
 # Create FastMCP server instance
@@ -20,6 +23,8 @@ object_manager = ObjectManager(simulation_manager)
 constraint_manager = ConstraintManager(simulation_manager)
 collision_handler = CollisionQueryHandler(simulation_manager)
 persistence_handler = PersistenceHandler(simulation_manager, object_manager, constraint_manager)
+ray_casting_handler = RayCastingHandler(simulation_manager)
+camera_renderer = CameraRenderer(simulation_manager)
 
 
 # ============================================================================
@@ -478,6 +483,425 @@ def apply_torque(
         raise ToolError(str(e))
     except Exception as e:
         raise ToolError(f"Failed to apply torque: {str(e)}")
+@mcp.tool
+def set_object_velocity(
+    sim_id: str,
+    object_id: int,
+    linear_velocity: Optional[list[float]] = None,
+    angular_velocity: Optional[list[float]] = None
+) -> str:
+    """Set an object's linear and/or angular velocity directly.
+
+    This instantly changes an object's velocity without applying forces.
+    Useful for launching projectiles, resetting velocities, or teleporting
+    objects with momentum.
+
+    Args:
+        sim_id: UUID string identifying the simulation.
+        object_id: PyBullet object ID.
+        linear_velocity: Linear velocity [vx, vy, vz] in m/s. If None, keeps current velocity.
+        angular_velocity: Angular velocity [wx, wy, wz] in rad/s. If None, keeps current velocity.
+
+    Returns:
+        Confirmation message.
+
+    Example:
+        # Launch a projectile horizontally
+        set_object_velocity(sim_id="abc-123", object_id=1, linear_velocity=[10, 0, 0])
+
+        # Stop an object completely
+        set_object_velocity(sim_id="abc-123", object_id=1,
+                          linear_velocity=[0, 0, 0], angular_velocity=[0, 0, 0])
+
+        # Make object spin without moving
+        set_object_velocity(sim_id="abc-123", object_id=1, angular_velocity=[0, 0, 5])
+
+    Note:
+        At least one of linear_velocity or angular_velocity must be provided.
+    """
+    try:
+        object_manager.set_object_velocity(sim_id, object_id, linear_velocity, angular_velocity)
+
+        # Build response message
+        parts = []
+        if linear_velocity is not None:
+            parts.append(f"linear velocity set to {linear_velocity}")
+        if angular_velocity is not None:
+            parts.append(f"angular velocity set to {angular_velocity}")
+
+        return f"Object {object_id} {' and '.join(parts)}"
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to set object velocity: {str(e)}")
+@mcp.tool
+def change_dynamics(
+    sim_id: str,
+    object_id: int,
+    link_index: int = -1,
+    mass: Optional[float] = None,
+    lateral_friction: Optional[float] = None,
+    spinning_friction: Optional[float] = None,
+    rolling_friction: Optional[float] = None,
+    restitution: Optional[float] = None,
+    linear_damping: Optional[float] = None,
+    angular_damping: Optional[float] = None,
+    contact_stiffness: Optional[float] = None,
+    contact_damping: Optional[float] = None
+) -> str:
+    """Modify object physics properties at runtime.
+
+    Allows changing physical properties after object creation. Useful for testing
+    failure scenarios, simulating wear/damage, or creating dynamic environments.
+
+    Args:
+        sim_id: UUID string identifying the simulation.
+        object_id: PyBullet object ID.
+        link_index: Link index (-1 for base). Default is -1.
+        mass: New mass in kg. None to keep current.
+        lateral_friction: Friction coefficient. None to keep current.
+        spinning_friction: Spinning friction coefficient. None to keep current.
+        rolling_friction: Rolling friction coefficient. None to keep current.
+        restitution: Restitution (bounciness) coefficient. None to keep current.
+        linear_damping: Linear damping coefficient. None to keep current.
+        angular_damping: Angular damping coefficient. None to keep current.
+        contact_stiffness: Contact stiffness. None to keep current.
+        contact_damping: Contact damping. None to keep current.
+
+    Returns:
+        Confirmation message.
+
+    Example:
+        # Make object slippery
+        change_dynamics(sim_id="abc-123", object_id=1, lateral_friction=0.1)
+
+        # Change mass and restitution
+        change_dynamics(sim_id="abc-123", object_id=1, mass=5.0, restitution=0.9)
+
+    Note:
+        At least one property must be specified.
+    """
+    try:
+        object_manager.change_dynamics(
+            sim_id, object_id, link_index, mass, lateral_friction,
+            spinning_friction, rolling_friction, restitution,
+            linear_damping, angular_damping, contact_stiffness, contact_damping
+        )
+
+        # Build response message
+        changes = []
+        if mass is not None:
+            changes.append(f"mass={mass}")
+        if lateral_friction is not None:
+            changes.append(f"friction={lateral_friction}")
+        if restitution is not None:
+            changes.append(f"restitution={restitution}")
+
+        if changes:
+            return f"Object {object_id} dynamics updated: {', '.join(changes[:3])}"
+        else:
+            return f"Object {object_id} dynamics updated"
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to change dynamics: {str(e)}")
+
+
+@mcp.tool
+def get_dynamics_info(sim_id: str, object_id: int, link_index: int = -1) -> dict:
+    """Query current dynamic properties of an object.
+
+    Returns all physical properties including mass, friction, restitution, damping, etc.
+
+    Args:
+        sim_id: UUID string identifying the simulation.
+        object_id: PyBullet object ID.
+        link_index: Link index (-1 for base). Default is -1.
+
+    Returns:
+        Dictionary containing:
+            - mass: Object mass in kg
+            - lateral_friction: Lateral friction coefficient
+            - local_inertia_diagonal: Inertia tensor diagonal [Ixx, Iyy, Izz]
+            - restitution: Restitution coefficient
+            - rolling_friction: Rolling friction coefficient
+            - spinning_friction: Spinning friction coefficient
+            - contact_damping: Contact damping
+            - contact_stiffness: Contact stiffness
+            - body_type: Body type (1=dynamic, 2=multibody, 3=soft body)
+            - collision_margin: Collision margin
+
+    Example:
+        get_dynamics_info(sim_id="abc-123", object_id=1)
+    """
+    try:
+        return object_manager.get_dynamics_info(sim_id, object_id, link_index)
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to get dynamics info: {str(e)}")
+@mcp.tool
+def ray_test(
+    sim_id: str,
+    ray_from: list[float],
+    ray_to: list[float]
+) -> dict:
+    """Cast a single ray to detect obstacles and measure distances.
+
+    Useful for proximity sensors, line-of-sight checks, and simple distance measurements.
+
+    Args:
+        sim_id: UUID string identifying the simulation.
+        ray_from: Starting position [x, y, z] of the ray.
+        ray_to: Ending position [x, y, z] of the ray.
+
+    Returns:
+        Dictionary containing:
+            - hit: Boolean indicating if ray hit an object
+            - object_id: ID of hit object (-1 if no hit)
+            - link_index: Link index of hit (-1 if base or no hit)
+            - hit_fraction: Fraction along ray where hit occurred (0-1)
+            - hit_position: Position [x, y, z] where ray hit
+            - hit_normal: Surface normal [x, y, z] at hit point
+
+    Example:
+        # Check if path is clear
+        result = ray_test(sim_id="abc-123", ray_from=[0, 0, 1], ray_to=[10, 0, 1])
+        if result["hit"]:
+            print(f"Obstacle at distance: {result['hit_fraction'] * 10}")
+    """
+    try:
+        return ray_casting_handler.ray_test(sim_id, ray_from, ray_to)
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to cast ray: {str(e)}")
+
+
+@mcp.tool
+def ray_test_batch(
+    sim_id: str,
+    rays_from: list[list[float]],
+    rays_to: list[list[float]]
+) -> list[dict]:
+    """Cast multiple rays efficiently for lidar/sensor simulation.
+
+    Much more efficient than calling ray_test multiple times. Perfect for
+    simulating lidar, sonar arrays, or multi-beam sensors.
+
+    Args:
+        sim_id: UUID string identifying the simulation.
+        rays_from: List of starting positions [[x, y, z], ...].
+        rays_to: List of ending positions [[x, y, z], ...].
+
+    Returns:
+        List of dictionaries, one per ray, each containing:
+            - hit: Boolean indicating if ray hit an object
+            - object_id: ID of hit object (-1 if no hit)
+            - link_index: Link index of hit (-1 if base or no hit)
+            - hit_fraction: Fraction along ray where hit occurred (0-1)
+            - hit_position: Position [x, y, z] where ray hit
+            - hit_normal: Surface normal [x, y, z] at hit point
+
+    Example:
+        # Simulate 360-degree lidar with 36 rays
+        import math
+        rays_from = [[0, 0, 1]] * 36
+        rays_to = []
+        for i in range(36):
+            angle = i * (2 * math.pi / 36)
+            rays_to.append([10 * math.cos(angle), 10 * math.sin(angle), 1])
+
+        results = ray_test_batch(sim_id="abc-123", rays_from=rays_from, rays_to=rays_to)
+        distances = [r["hit_fraction"] * 10 if r["hit"] else 10 for r in results]
+    """
+    try:
+        return ray_casting_handler.ray_test_batch(sim_id, rays_from, rays_to)
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to cast rays: {str(e)}")
+@mcp.tool
+def compute_view_matrix(
+    camera_eye_position: list[float],
+    camera_target_position: list[float],
+    camera_up_vector: list[float]
+) -> list[float]:
+    """Compute view matrix from camera pose.
+
+    Helper function to create view matrix for get_camera_image().
+
+    Args:
+        camera_eye_position: Camera position [x, y, z].
+        camera_target_position: Point camera looks at [x, y, z].
+        camera_up_vector: Camera up direction [x, y, z]. Usually [0, 0, 1] for Z-up.
+
+    Returns:
+        View matrix as list of 16 floats (4x4 matrix).
+
+    Example:
+        # Camera at [5, 5, 3] looking at origin
+        view_matrix = compute_view_matrix(
+            camera_eye_position=[5, 5, 3],
+            camera_target_position=[0, 0, 0],
+            camera_up_vector=[0, 0, 1]
+        )
+    """
+    try:
+        return camera_renderer.compute_view_matrix(
+            camera_eye_position, camera_target_position, camera_up_vector
+        )
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to compute view matrix: {str(e)}")
+
+
+@mcp.tool
+def compute_projection_matrix(
+    fov: float,
+    aspect: float,
+    near_plane: float,
+    far_plane: float
+) -> list[float]:
+    """Compute projection matrix from camera parameters.
+
+    Helper function to create projection matrix for get_camera_image().
+
+    Args:
+        fov: Field of view in degrees (e.g., 60).
+        aspect: Aspect ratio (width / height, e.g., 1.33 for 640x480).
+        near_plane: Near clipping plane distance (e.g., 0.1).
+        far_plane: Far clipping plane distance (e.g., 100).
+
+    Returns:
+        Projection matrix as list of 16 floats (4x4 matrix).
+
+    Example:
+        # Standard camera for 640x480 image
+        proj_matrix = compute_projection_matrix(
+            fov=60,
+            aspect=640/480,
+            near_plane=0.1,
+            far_plane=100
+        )
+    """
+    try:
+        return camera_renderer.compute_projection_matrix(fov, aspect, near_plane, far_plane)
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to compute projection matrix: {str(e)}")
+
+
+@mcp.tool
+def get_camera_image(
+    sim_id: str,
+    width: int,
+    height: int,
+    view_matrix: list[float],
+    projection_matrix: list[float],
+    renderer: str = "ER_BULLET_HARDWARE_OPENGL"
+) -> dict:
+    """Render RGB, depth, and segmentation images from camera.
+
+    Captures images from a virtual camera for vision-based control, computer vision
+    testing, or ML training data generation.
+
+    Args:
+        sim_id: UUID string identifying the simulation.
+        width: Image width in pixels (e.g., 640).
+        height: Image height in pixels (e.g., 480).
+        view_matrix: View matrix from compute_view_matrix().
+        projection_matrix: Projection matrix from compute_projection_matrix().
+        renderer: Renderer type. Options:
+            - "ER_BULLET_HARDWARE_OPENGL" (default, fastest)
+            - "ER_TINY_RENDERER" (software, slower but more compatible)
+
+    Returns:
+        Dictionary containing:
+            - width: Image width
+            - height: Image height
+            - rgb: RGB image as base64-encoded PNG string
+            - depth: Depth buffer as list of floats (0=near, 1=far)
+            - segmentation: Segmentation mask as list of ints (object IDs)
+
+    Example:
+        # Setup camera
+        view_matrix = compute_view_matrix(
+            camera_eye_position=[5, 5, 3],
+            camera_target_position=[0, 0, 0],
+            camera_up_vector=[0, 0, 1]
+        )
+        proj_matrix = compute_projection_matrix(
+            fov=60, aspect=640/480, near_plane=0.1, far_plane=100
+        )
+
+        # Render image
+        image = get_camera_image(
+            sim_id="abc-123",
+            width=640,
+            height=480,
+            view_matrix=view_matrix,
+            projection_matrix=proj_matrix
+        )
+
+        # Decode RGB image
+        import base64
+        from PIL import Image
+        import io
+        rgb_data = base64.b64decode(image["rgb"])
+        img = Image.open(io.BytesIO(rgb_data))
+    """
+    try:
+        return camera_renderer.get_camera_image(
+            sim_id, width, height, view_matrix, projection_matrix, renderer
+        )
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to render camera image: {str(e)}")
+
+
+@mcp.tool
+def compute_view_matrix_from_yaw_pitch(
+    distance: float,
+    yaw: float,
+    pitch: float,
+    target_position: list[float],
+    up_axis_index: int = 2
+) -> list[float]:
+    """Compute view matrix from spherical coordinates (orbit camera).
+
+    Easier alternative to compute_view_matrix() for orbit-style cameras.
+
+    Args:
+        distance: Distance from camera to target.
+        yaw: Yaw angle in degrees (rotation around up axis).
+        pitch: Pitch angle in degrees (up/down tilt).
+        target_position: Point camera looks at [x, y, z].
+        up_axis_index: Up axis (0=X, 1=Y, 2=Z). Default is 2 (Z-up).
+
+    Returns:
+        View matrix as list of 16 floats (4x4 matrix).
+
+    Example:
+        # Orbit camera 5 meters away, 45 degrees yaw, -30 degrees pitch
+        view_matrix = compute_view_matrix_from_yaw_pitch(
+            distance=5,
+            yaw=45,
+            pitch=-30,
+            target_position=[0, 0, 0]
+        )
+    """
+    try:
+        return camera_renderer.compute_view_matrix_from_yaw_pitch(
+            distance, yaw, pitch, target_position, up_axis_index
+        )
+    except ValueError as e:
+        raise ToolError(str(e))
+    except Exception as e:
+        raise ToolError(f"Failed to compute view matrix: {str(e)}")
 
 
 # ============================================================================
@@ -1015,6 +1439,114 @@ def calculate_inverse_kinematics(
         raise ToolError(str(e))
     except Exception as e:
         raise ToolError(f"Failed to calculate inverse kinematics: {str(e)}")
+
+
+# ============================================================================
+# URDF Generation Tools
+# ============================================================================
+
+@mcp.tool
+def generate_revolute_joint(
+    parent_shape: str,
+    child_shape: str,
+    parent_dimensions: list[float],
+    child_dimensions: list[float],
+    parent_mass: float,
+    child_mass: float,
+    joint_axis: list[float],
+    joint_origin: list[float] = None,
+    joint_lower_limit: float = -3.14159,
+    joint_upper_limit: float = 3.14159,
+    max_effort: float = 100.0,
+    max_velocity: float = 10.0,
+    output_path: str = None
+) -> dict:
+    """Generate a URDF file with a revolute (hinge) joint between two shapes.
+    
+    PyBullet's createConstraint API does not support revolute joints at runtime.
+    This tool generates a URDF file that can be loaded with load_urdf() to create
+    objects connected by a revolute joint.
+    
+    Args:
+        parent_shape: Shape type for parent - "box", "sphere", or "cylinder"
+        child_shape: Shape type for child - "box", "sphere", or "cylinder"
+        parent_dimensions: Dimensions for parent shape:
+            - box: [half_x, half_y, half_z]
+            - sphere: [radius]
+            - cylinder: [radius, height]
+        child_dimensions: Dimensions for child shape (same format as parent)
+        parent_mass: Mass of parent link in kg
+        child_mass: Mass of child link in kg
+        joint_axis: Axis of rotation [x, y, z] (e.g., [0, 0, 1] for z-axis)
+        joint_origin: Joint position relative to parent [x, y, z]. Default [0, 0, 0]
+        joint_lower_limit: Lower joint limit in radians. Default -π
+        joint_upper_limit: Upper joint limit in radians. Default π
+        max_effort: Maximum joint effort in N·m. Default 100.0
+        max_velocity: Maximum joint velocity in rad/s. Default 10.0
+        output_path: Path to save URDF file. If None, creates temp file.
+    
+    Returns:
+        Dictionary with:
+            - urdf_path: Path to generated URDF file
+            - parent_shape: Parent shape type
+            - child_shape: Child shape type
+            - joint_type: "revolute"
+    
+    Example:
+        # Create a door with hinge
+        result = generate_revolute_joint(
+            parent_shape="box",
+            child_shape="box",
+            parent_dimensions=[0.05, 1.0, 1.5],  # Wall (thin, wide, tall)
+            child_dimensions=[0.025, 0.8, 1.4],  # Door (thin, narrower, slightly shorter)
+            parent_mass=100.0,  # Heavy wall
+            child_mass=10.0,    # Lighter door
+            joint_axis=[0, 0, 1],  # Rotate around z-axis
+            joint_origin=[0, 0.9, 0],  # Hinge at edge of wall
+            joint_lower_limit=-1.57,  # -90 degrees
+            joint_upper_limit=1.57    # +90 degrees
+        )
+        
+        # Load the generated URDF
+        load_urdf(sim_id="...", file_path=result["urdf_path"], position=[0, 0, 0])
+    
+    Raises:
+        ToolError: If invalid shape type or generation fails
+    """
+    try:
+        # Set defaults
+        if joint_origin is None:
+            joint_origin = [0.0, 0.0, 0.0]
+        
+        # Generate URDF file
+        urdf_path = generate_revolute_joint_urdf(
+            parent_shape=parent_shape,
+            child_shape=child_shape,
+            parent_dimensions=parent_dimensions,
+            child_dimensions=child_dimensions,
+            parent_mass=parent_mass,
+            child_mass=child_mass,
+            joint_axis=joint_axis,
+            joint_origin=joint_origin,
+            joint_limits=(joint_lower_limit, joint_upper_limit),
+            max_effort=max_effort,
+            max_velocity=max_velocity,
+            output_path=output_path
+        )
+        
+        return {
+            "urdf_path": urdf_path,
+            "parent_shape": parent_shape,
+            "child_shape": child_shape,
+            "joint_type": "revolute",
+            "joint_axis": joint_axis,
+            "joint_limits": [joint_lower_limit, joint_upper_limit]
+        }
+        
+    except ValueError as e:
+        raise ToolError(f"Failed to generate revolute joint URDF: {e}")
+    except Exception as e:
+        raise ToolError(f"Unexpected error generating URDF: {e}")
 
 
 # ============================================================================
